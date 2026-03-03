@@ -1,20 +1,21 @@
 package com.example.magichand
+
 import android.content.Context
-import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import android.graphics.Color
 import android.hardware.Sensor
 import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Bundle
 import android.view.View
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import java.util.Locale
+
 class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var rootLayout: View
     private lateinit var textView: TextView
-    private val THRESHOLD = 12.0f // Adjust this: 9.8 is gravity, 12+ is a firm move
+    private val THRESHOLD = 5.0f // Sensitivity for movement detection
 
     private lateinit var sensorManager: SensorManager
     private var accelerometer: Sensor? = null
@@ -27,18 +28,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         rootLayout = findViewById(R.id.root_layout)
         textView = findViewById(R.id.SensorData)
 
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        // 1. Initialize the Sensor Manager
+        // Initialize the Sensor Manager
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-        // 2. Get the Linear Acceleration sensor (excludes gravity)
+        // Use Linear Acceleration to detect movement (ignores gravity)
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        // 'findViewById' looks into your XML and finds the item with that specific ID
-        val myDisplay = findViewById<TextView>(R.id.SensorData)
 
-        myDisplay.text = "Sensor Data: 0.0"
+        if (accelerometer == null) {
+            textView.text = "Linear Acceleration sensor not available on this device."
+        } else {
+            textView.text = "Sensor Data: Waiting for movement..."
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Register the sensor listener
+        accelerometer?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Unregister to save battery
+        sensorManager.unregisterListener(this)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -47,20 +61,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val y = event.values[1]
             val z = event.values[2]
 
-            // This is where you will send data to your gesture detection logic
-            detectGesture(x, y, z)
+            // Constantly update the display with raw sensor data
+            textView.text = String.format(Locale.getDefault(), "X: %.2f\nY: %.2f\nZ: %.2f", x, y, z)
+
+            // Detect movement and update background color
+            detectMovement(x, y, z)
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // Usually left empty for basic gesture apps
+        // Not needed for this basic implementation
     }
 
-    private fun detectGesture(x: Float, y: Float, z: Float) {
-        // For now, we just print to the console to see if it's working
-        if (x > 10 || y > 10 || z > 10) {
-            println("Gesture Detected: Sudden Movement!")
+    private fun detectMovement(x: Float, y: Float, z: Float) {
+        // Calculate the magnitude of total acceleration
+        val accelerationMagnitude = Math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
 
+        if (accelerationMagnitude > THRESHOLD) {
+            // Turn screen green when movement is detected
+            rootLayout.setBackgroundColor(Color.GREEN)
+        } else {
+            // Revert to white when the device is still
+            rootLayout.setBackgroundColor(Color.WHITE)
         }
     }
 }
