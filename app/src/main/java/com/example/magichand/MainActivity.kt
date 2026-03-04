@@ -130,13 +130,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             if (detectedGesture != "UNKNOWN") {
                 showDetectedGesture(detectedGesture)
             } else {
-                // Return to white if no gesture and not recording
-                val accelerationMagnitude = sqrt((point.x * point.x + point.y * point.y + point.z * point.z).toDouble()).toFloat()
-                if (accelerationMagnitude <= movementThreshold) {
-                    binding.rootLayout.setBackgroundColor(Color.WHITE)
-                } else {
-                    binding.rootLayout.setBackgroundColor(Color.GREEN)
-                }
+                binding.rootLayout.setBackgroundColor(Color.WHITE)
             }
         }
     }

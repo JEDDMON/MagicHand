@@ -59,7 +59,7 @@ fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>): 
 fun classifyGesture(
     liveData: List<SensorPoint>,
     library: List<GestureTemplate>,
-    threshold: Float = 150f // You will need to test and adjust this number!
+    threshold: Float = 175f // You will need to test and adjust this number!
 ): String {
 
     var bestMatch = "UNKNOWN"
