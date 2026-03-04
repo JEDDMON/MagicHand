@@ -27,6 +27,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // Link the UI elements to your code
         rootLayout = findViewById(R.id.root_layout)
         textView = findViewById(R.id.SensorData)
+        display = findViewById(R.id.g_display)
+        slider = findViewById(R.id.g_slider)
+        calibrate = findViewById(R.id.g_calibrate)
+
 
         // Initialize the Sensor Manager
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager

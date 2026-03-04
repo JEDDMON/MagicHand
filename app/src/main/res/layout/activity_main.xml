@@ -14,9 +14,43 @@
         android:text="SensorData"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.293"
+        app:layout_constraintHorizontal_bias="0.15"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.193" />
+        app:layout_constraintVertical_bias="0.058" />
+
+    <SeekBar
+        android:id="@+id/g_slider"
+        style="@style/Widget.AppCompat.SeekBar.Discrete"
+        android:layout_width="141dp"
+        android:layout_height="87dp"
+        android:max="2"
+        android:progress="0"
+        tools:layout_editor_absoluteX="35dp"
+        tools:layout_editor_absoluteY="354dp" />
+
+    <Button
+        android:id="@+id/g_calibrate"
+        android:layout_width="226dp"
+        android:layout_height="127dp"
+        android:text="Calibrate Gesture"
+        tools:layout_editor_absoluteX="79dp"
+        tools:layout_editor_absoluteY="495dp" />
+
+    <TextView
+        android:id="@+id/textView"
+        android:layout_width="67dp"
+        android:layout_height="37dp"
+        android:text="Gesture Selected:"
+        tools:layout_editor_absoluteX="200dp"
+        tools:layout_editor_absoluteY="354dp" />
+
+    <TextView
+        android:id="@+id/g_display"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TextView"
+        tools:layout_editor_absoluteX="207dp"
+        tools:layout_editor_absoluteY="405dp" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
