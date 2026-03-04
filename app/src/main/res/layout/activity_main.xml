@@ -5,73 +5,60 @@
     android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:padding="16dp"
     tools:context=".MainActivity">
 
     <TextView
         android:id="@+id/SensorData"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="SensorData"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.15"
+        android:text="Sensor Data: X, Y, Z"
+        android:textSize="14sp"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.058" />
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/textView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="Select Slot for Calibration:"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/SensorData" />
 
     <SeekBar
         android:id="@+id/g_slider"
         style="@style/Widget.AppCompat.SeekBar.Discrete"
-        android:layout_width="74dp"
-        android:layout_height="54dp"
-        android:layout_marginStart="35dp"
-        android:layout_marginTop="354dp"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="54dp"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:max="2"
         android:progress="0"
-        app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
-        app:layout_constraintEnd_toStartOf="@+id/textView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <Button
-        android:id="@+id/g_calibrate"
-        android:layout_width="226dp"
-        android:layout_height="0dp"
-        android:layout_marginStart="79dp"
-        android:layout_marginBottom="109dp"
-        android:text="Calibrate Gesture"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/g_display" />
-
-    <TextView
-        android:id="@+id/textView"
-        android:layout_width="86dp"
-        android:layout_height="45dp"
-        android:layout_marginTop="354dp"
-        android:layout_marginEnd="144dp"
-        android:layout_marginBottom="14dp"
-        android:text="Gesture Selected:"
-        app:layout_constraintBottom_toTopOf="@+id/g_display"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/g_slider"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/textView" />
 
     <TextView
         android:id="@+id/g_display"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="2dp"
-        android:layout_marginBottom="71dp"
-        android:text="TextView"
+        android:text="Slot: 0"
+        android:textSize="48sp"
+        android:textStyle="bold"
         app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
-        app:layout_constraintEnd_toEndOf="@+id/textView"
-        app:layout_constraintTop_toBottomOf="@+id/textView" />
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/g_slider" />
 
-    <androidx.constraintlayout.widget.Guideline
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
+    <Button
+        android:id="@+id/g_calibrate"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_marginBottom="32dp"
+        android:text="HOLD TO CALIBRATE"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
