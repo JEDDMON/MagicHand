@@ -22,35 +22,56 @@
     <SeekBar
         android:id="@+id/g_slider"
         style="@style/Widget.AppCompat.SeekBar.Discrete"
-        android:layout_width="141dp"
-        android:layout_height="87dp"
+        android:layout_width="74dp"
+        android:layout_height="54dp"
+        android:layout_marginStart="35dp"
+        android:layout_marginTop="354dp"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="54dp"
         android:max="2"
         android:progress="0"
-        tools:layout_editor_absoluteX="35dp"
-        tools:layout_editor_absoluteY="354dp" />
+        app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
+        app:layout_constraintEnd_toStartOf="@+id/textView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <Button
         android:id="@+id/g_calibrate"
         android:layout_width="226dp"
-        android:layout_height="127dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="79dp"
+        android:layout_marginBottom="109dp"
         android:text="Calibrate Gesture"
-        tools:layout_editor_absoluteX="79dp"
-        tools:layout_editor_absoluteY="495dp" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/g_display" />
 
     <TextView
         android:id="@+id/textView"
-        android:layout_width="67dp"
-        android:layout_height="37dp"
+        android:layout_width="86dp"
+        android:layout_height="45dp"
+        android:layout_marginTop="354dp"
+        android:layout_marginEnd="144dp"
+        android:layout_marginBottom="14dp"
         android:text="Gesture Selected:"
-        tools:layout_editor_absoluteX="200dp"
-        tools:layout_editor_absoluteY="354dp" />
+        app:layout_constraintBottom_toTopOf="@+id/g_display"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/g_slider"
+        app:layout_constraintTop_toTopOf="parent" />
 
     <TextView
         android:id="@+id/g_display"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginEnd="2dp"
+        android:layout_marginBottom="71dp"
         android:text="TextView"
-        tools:layout_editor_absoluteX="207dp"
-        tools:layout_editor_absoluteY="405dp" />
+        app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
+        app:layout_constraintEnd_toEndOf="@+id/textView"
+        app:layout_constraintTop_toBottomOf="@+id/textView" />
+
+    <androidx.constraintlayout.widget.Guideline
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

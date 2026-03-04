@@ -7,6 +7,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
+import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import com.example.magichand.databinding.ActivityMainBinding
 import java.util.Locale
@@ -41,6 +42,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else {
             binding.SensorData.text = "Sensor Data: Waiting for movement..."
         }
+
+        binding.gSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // Update the TextView with the current slider value (0, 1, or 2)
+                binding.gDisplay.text = progress.toString()
+            }
+
+            // These two methods are required by the interface but can be left empty
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
     }
 
     override fun onResume() {
