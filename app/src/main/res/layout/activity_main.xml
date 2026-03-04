@@ -46,10 +46,22 @@
         android:text="Slot: 0"
         android:textSize="48sp"
         android:textStyle="bold"
-        app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
+        app:layout_constraintBottom_toTopOf="@+id/g_delete"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/g_slider" />
+
+    <Button
+        android:id="@+id/g_delete"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="@android:color/holo_red_dark"
+        android:text="Delete Gesture"
+        android:textColor="@android:color/white"
+        app:layout_constraintBottom_toTopOf="@+id/g_calibrate"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
     <Button
         android:id="@+id/g_calibrate"
