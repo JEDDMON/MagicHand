@@ -22,10 +22,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
 
-    // Gesture detection variables
+    // Gesture detection variables - Now supports multiple examples per slot
     private var isRecording = false
     private val recordedPoints = mutableListOf<SensorPoint>()
-    private val gestureLibrary = mutableMapOf<Int, List<SensorPoint>>()
+    private val gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
     
     // Live detection buffer
     private val liveBuffer = mutableListOf<SensorPoint>()
@@ -64,24 +64,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
 
-        // Handle Delete Button
+        // Handle Delete Button - Now deletes all examples for the current slot
         binding.gDelete.setOnClickListener {
             val currentSlot = binding.gSlider.progress
             gestureLibrary.remove(currentSlot)
-            binding.SensorData.text = "Deleted gesture in Slot $currentSlot"
+            updateSlotDisplay(currentSlot)
+            binding.SensorData.text = "Deleted all examples in Slot $currentSlot"
         }
 
         // Update Slider Display
         binding.gSlider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!isGestureCooldown) {
-                    binding.gDisplay.text = "Slot: $progress"
+                    updateSlotDisplay(progress)
                 }
             }
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
-        binding.gDisplay.text = "Slot: ${binding.gSlider.progress}"
+        updateSlotDisplay(binding.gSlider.progress)
+    }
+
+    private fun updateSlotDisplay(slot: Int) {
+        val count = gestureLibrary[slot]?.size ?: 0
+        binding.gDisplay.text = "Slot: $slot ($count examples)"
     }
 
     private fun startRecording() {
@@ -94,12 +100,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         isRecording = false
         val currentSlot = binding.gSlider.progress
         
-        // IMPORTANT: Copy the points so they don't get cleared later
+        // Copy the points so they don't get cleared later
         val trimmedPoints = trimSilence(recordedPoints.toList())
         
         if (trimmedPoints.isNotEmpty()) {
-            gestureLibrary[currentSlot] = trimmedPoints
-            binding.SensorData.text = "Saved gesture to Slot $currentSlot (${trimmedPoints.size} points)"
+            // Add the new example to the list for this slot
+            val examples = gestureLibrary.getOrPut(currentSlot) { mutableListOf() }
+            examples.add(trimmedPoints)
+            
+            updateSlotDisplay(currentSlot)
+            binding.SensorData.text = "Saved example #${examples.size} to Slot $currentSlot"
         } else {
             binding.SensorData.text = "Recording was too quiet or empty."
         }
@@ -116,7 +126,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         
         if (firstActive == -1 || lastActive == -1) return emptyList()
-        // Use subList and THEN toList() to create a hard copy of the data
         return points.subList(firstActive, lastActive + 1).toList()
     }
 
@@ -130,18 +139,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(this)
-        // Clean up any pending UI resets to avoid crashes if activity is paused
         handler.removeCallbacksAndMessages(null)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        // Safe check for event and values
         if (event != null && event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION && event.values.size >= 3) {
             val x = event.values[0]
             val y = event.values[1]
             val z = event.values[2]
             
-            val currentPoint = SensorPoint(x, y, z)
+            // Noise filtering: if acceleration is very low, treat it as zero
+            val currentPoint = if (x * x + y * y + z * z < 0.5) {
+                SensorPoint(0f, 0f, 0f)
+            } else {
+                SensorPoint(x, y, z)
+            }
 
             // Update UI safely
             binding.SensorData.text = String.format(Locale.getDefault(), "X: %.2f\nY: %.2f\nZ: %.2f", x, y, z)
@@ -160,7 +172,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             liveBuffer.removeAt(0)
         }
 
-        // Only try to detect if we have templates saved and the buffer is full
         if (gestureLibrary.isNotEmpty() && liveBuffer.size == bufferSize) {
             
             var maxMagnitude = 0f
@@ -175,8 +186,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 return
             }
 
-            // Map library to templates list
-            val templates = gestureLibrary.map { GestureTemplate(it.key.toString(), it.value) }
+            // Map library to templates list - account for multiple examples
+            val templates = mutableListOf<GestureTemplate>()
+            for ((slot, examples) in gestureLibrary) {
+                for (example in examples) {
+                    templates.add(GestureTemplate(slot.toString(), example))
+                }
+            }
             
             // Pass a copy of the live buffer to the classifier
             val detectedGesture = classifyGesture(liveBuffer.toList(), templates, threshold = 150f)
@@ -195,10 +211,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         liveBuffer.clear()
 
         handler.postDelayed({
-            // Check if binding is still available before updating UI
             isGestureCooldown = false
             binding.rootLayout.setBackgroundColor(Color.WHITE)
-            binding.gDisplay.text = "Slot: ${binding.gSlider.progress}"
+            updateSlotDisplay(binding.gSlider.progress)
             binding.SensorData.text = "Ready for next gesture"
         }, 1000)
     }
@@ -207,7 +222,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Final cleanup of the handler
         handler.removeCallbacksAndMessages(null)
     }
 }
