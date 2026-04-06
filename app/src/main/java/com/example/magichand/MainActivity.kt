@@ -3,6 +3,7 @@ package com.example.magichand
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -21,6 +22,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var binding: ActivityMainBinding
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
+    private var defaultBackground: Drawable? = null
 
     // Gesture detection variables - Now supports multiple examples per slot
     private var isRecording = false
@@ -40,6 +42,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Store the default background to revert to it later
+        defaultBackground = binding.rootLayout.background
 
         // Initialize the Sensor Manager safely
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -113,7 +118,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else {
             binding.SensorData.text = "Recording was too quiet or empty."
         }
-        binding.rootLayout.setBackgroundColor(Color.WHITE)
+        resetBackground()
+    }
+
+    private fun resetBackground() {
+        binding.rootLayout.background = defaultBackground
     }
 
     private fun trimSilence(points: List<SensorPoint>): List<SensorPoint> {
@@ -195,7 +204,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             
             // Pass a copy of the live buffer to the classifier
-            val detectedGesture = classifyGesture(liveBuffer.toList(), templates, threshold = 150f)
+            val detectedGesture = classifyGesture(liveBuffer.toList(), templates, threshold = 1.0f)
 
             if (detectedGesture != "UNKNOWN") {
                 showDetectedGesture(detectedGesture)
@@ -212,7 +221,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         handler.postDelayed({
             isGestureCooldown = false
-            binding.rootLayout.setBackgroundColor(Color.WHITE)
+            resetBackground()
             updateSlotDisplay(binding.gSlider.progress)
             binding.SensorData.text = "Ready for next gesture"
         }, 1000)
