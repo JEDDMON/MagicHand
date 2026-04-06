@@ -1,5 +1,6 @@
 package com.example.magichand
 
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
@@ -17,7 +18,39 @@ fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
     return sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
 }
 
-fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>): Float {
+/**
+ * Feature A: Data Normalization
+ * Normalizes the points so that the maximum amplitude in any direction is 1.0.
+ * This ensures that a "slow swipe" and a "fast swipe" look similar to the algorithm.
+ */
+private fun normalizeGesture(points: List<SensorPoint>): List<SensorPoint> {
+    if (points.isEmpty()) return points
+    var maxVal = 0.001f // Avoid division by zero
+    for (p in points) {
+        val currentMax = maxOf(abs(p.x), abs(p.y), abs(p.z))
+        if (currentMax > maxVal) maxVal = currentMax
+    }
+    return points.map { SensorPoint(it.x / maxVal, it.y / maxVal, it.z / maxVal) }
+}
+
+/**
+ * Feature B: Axis Invariance (via Deltas)
+ * Converts absolute sensor values into the change (delta) between points.
+ * This helps focus on the *shape* of the movement rather than the absolute orientation.
+ */
+private fun toDeltas(points: List<SensorPoint>): List<SensorPoint> {
+    if (points.size < 2) return points
+    return points.zipWithNext { a, b ->
+        SensorPoint(b.x - a.x, b.y - a.y, b.z - a.z)
+    }
+}
+
+/**
+ * Feature C: Sakoe-Chiba Band
+ * Restricts the DTW search to a window around the diagonal to improve performance
+ * and prevent "garbage" matches (e.g., matching the start of a gesture to the end).
+ */
+fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>, windowSize: Int = 15): Float {
     val n = liveData.size
     val m = templateData.size
 
@@ -25,52 +58,57 @@ fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>): 
     if (n == 0 || m == 0) return Float.POSITIVE_INFINITY
 
     // Create the 2D grid filled with Infinity
-    // The grid is 1 size larger than the data to allow for the [0][0] starting point
     val grid = Array(n + 1) { FloatArray(m + 1) { Float.POSITIVE_INFINITY } }
 
     // The starting cost is strictly 0
     grid[0][0] = 0f
 
-    // Loop through the matrix
+    // Calculate the Sakoe-Chiba window constraint
+    val window = maxOf(windowSize, abs(n - m))
+
+    // Loop through the matrix within the Sakoe-Chiba band
     for (i in 1..n) {
-        for (j in 1..m) {
-            // Arrays are 0-indexed, but our grid loop starts at 1
-            // So we subtract 1 to get the actual 3D points
+        val start = maxOf(1, i - window)
+        val end = minOf(m, i + window)
+        for (j in start..end) {
             val cost = calculateDistance(liveData[i - 1], templateData[j - 1])
 
             // Find the lowest cost among the three adjacent cells (Left, Top, Top-Left)
-            val minPrevious = min(
-                grid[i - 1][j],       // Cell above
-                min(
-                    grid[i][j - 1],   // Cell to the left
-                    grid[i - 1][j - 1] // Cell diagonally top-left
-                )
+            val minPrevious = minOf(
+                grid[i - 1][j],       // Top
+                grid[i][j - 1],       // Left
+                grid[i - 1][j - 1]    // Diagonal
             )
 
-            // Add the current cost to the cheapest previous path
-            grid[i][j] = cost + minPrevious
+            if (minPrevious != Float.POSITIVE_INFINITY) {
+                grid[i][j] = cost + minPrevious
+            }
         }
     }
 
-    // The final accumulated DTW distance is located in the very last bottom-right cell
+    // Return the final accumulated DTW distance
     return grid[n][m]
 }
 
 fun classifyGesture(
     liveData: List<SensorPoint>,
     library: List<GestureTemplate>,
-    threshold: Float = 175f // You will need to test and adjust this number!
+    threshold: Float = 60f // Adjusted threshold for normalized delta data
 ): String {
+
+    // Pre-process live data: Convert to deltas and normalize scale
+    val processedLive = normalizeGesture(toDeltas(liveData))
+    if (processedLive.isEmpty()) return "UNKNOWN"
 
     var bestMatch = "UNKNOWN"
     var lowestScore = Float.POSITIVE_INFINITY
 
     // Loop through every saved gesture in the library
     for (template in library) {
-        val score = calculateDTW(liveData, template.data)
-
-        // Optional: Print the scores to Logcat so you can calibrate your threshold
-        println("DTW Score for ${template.name}: $score")
+        // Pre-process template data: Convert to deltas and normalize scale
+        val processedTemplate = normalizeGesture(toDeltas(template.data))
+        
+        val score = calculateDTW(processedLive, processedTemplate)
 
         if (score < lowestScore) {
             lowestScore = score
