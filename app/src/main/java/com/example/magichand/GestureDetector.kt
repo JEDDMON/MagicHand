@@ -1,7 +1,6 @@
 package com.example.magichand
 
 import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.sqrt
 
 // Holds a single moment in time from your accelerometer
@@ -10,74 +9,83 @@ data class SensorPoint(val x: Float, val y: Float, val z: Float)
 // Holds a full saved gesture (e.g., "Swipe") and its list of points
 data class GestureTemplate(val name: String, val data: List<SensorPoint>)
 
+/**
+ * Calculates the Euclidean distance between two points in 3D space.
+ */
 fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
     val dx = p2.x - p1.x
     val dy = p2.y - p1.y
     val dz = p2.z - p1.z
-    // We convert to Double for the sqrt, then back to Float for Android
     return sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
 }
 
 /**
- * Feature A: Data Normalization
- * Normalizes the points so that the maximum amplitude in any direction is 1.0.
- * This ensures that a "slow swipe" and a "fast swipe" look similar to the algorithm.
+ * Recommendation 5: Trimming Silence
+ * Removes points from the start and end where movement is near zero.
+ * This ensures the DTW algorithm doesn't get confused by "standing still" time.
  */
-private fun normalizeGesture(points: List<SensorPoint>): List<SensorPoint> {
-    if (points.isEmpty()) return points
-    var maxVal = 0.001f // Avoid division by zero
-    for (p in points) {
-        val currentMax = maxOf(abs(p.x), abs(p.y), abs(p.z))
-        if (currentMax > maxVal) maxVal = currentMax
+private fun trimSilence(points: List<SensorPoint>): List<SensorPoint> {
+    val activityThreshold = 0.5f 
+    val firstActive = points.indexOfFirst { p -> 
+        sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
     }
-    return points.map { SensorPoint(it.x / maxVal, it.y / maxVal, it.z / maxVal) }
+    val lastActive = points.indexOfLast { p -> 
+        sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
+    }
+    
+    if (firstActive == -1 || lastActive == -1) return emptyList()
+    return points.subList(firstActive, lastActive + 1)
 }
 
 /**
- * Feature B: Axis Invariance (via Deltas)
- * Converts absolute sensor values into the change (delta) between points.
- * This helps focus on the *shape* of the movement rather than the absolute orientation.
+ * Recommendation 3: toUnitDirections (Replacing toDeltas)
+ * Converts movement into a series of direction vectors with length 1.0.
+ * This makes the gesture detection independent of how far/fast the user moved.
  */
-private fun toDeltas(points: List<SensorPoint>): List<SensorPoint> {
-    if (points.size < 2) return points
+private fun toUnitDirections(points: List<SensorPoint>): List<SensorPoint> {
+    if (points.size < 2) return emptyList()
     return points.zipWithNext { a, b ->
-        SensorPoint(b.x - a.x, b.y - a.y, b.z - a.z)
+        val dx = b.x - a.x
+        val dy = b.y - a.y
+        val dz = b.z - a.z
+        val mag = sqrt((dx * dx + dy * dy + dz * dz).toDouble()).toFloat()
+        if (mag > 0.1f) { // Noise gate: only record if there was actual movement
+            SensorPoint(dx / mag, dy / mag, dz / mag)
+        } else {
+            SensorPoint(0f, 0f, 0f)
+        }
     }
 }
 
 /**
- * Feature C: Sakoe-Chiba Band
- * Restricts the DTW search to a window around the diagonal to improve performance
- * and prevent "garbage" matches (e.g., matching the start of a gesture to the end).
+ * Feature C: Sakoe-Chiba Band + Recommendation 1 & 4
+ * Calculates the Dynamic Time Warping distance between two series of points.
  */
 fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>, windowSize: Int = 15): Float {
     val n = liveData.size
     val m = templateData.size
 
-    // Edge case: If either list is empty, return an impossibly high score
     if (n == 0 || m == 0) return Float.POSITIVE_INFINITY
 
     // Create the 2D grid filled with Infinity
     val grid = Array(n + 1) { FloatArray(m + 1) { Float.POSITIVE_INFINITY } }
-
-    // The starting cost is strictly 0
     grid[0][0] = 0f
 
-    // Calculate the Sakoe-Chiba window constraint
+    // Sakoe-Chiba constraint window
     val window = maxOf(windowSize, abs(n - m))
 
-    // Loop through the matrix within the Sakoe-Chiba band
     for (i in 1..n) {
         val start = maxOf(1, i - window)
         val end = minOf(m, i + window)
         for (j in start..end) {
             val cost = calculateDistance(liveData[i - 1], templateData[j - 1])
 
-            // Find the lowest cost among the three adjacent cells (Left, Top, Top-Left)
+            // Recommendation 4: Slope Constraint
+            // Penalize horizontal and vertical steps to favor the diagonal (perfect timing).
             val minPrevious = minOf(
-                grid[i - 1][j],       // Top
-                grid[i][j - 1],       // Left
-                grid[i - 1][j - 1]    // Diagonal
+                grid[i - 1][j] + 0.1f,       // Top (Stalling live)
+                grid[i][j - 1] + 0.1f,       // Left (Stalling template)
+                grid[i - 1][j - 1]           // Diagonal (Match)
             )
 
             if (minPrevious != Float.POSITIVE_INFINITY) {
@@ -86,28 +94,35 @@ fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>, w
         }
     }
 
-    // Return the final accumulated DTW distance
-    return grid[n][m]
+    // Recommendation 1: Normalize by Average Cost (Length of path)
+    // This removes the bias towards shorter gestures.
+    return grid[n][m] / (n + m)
 }
 
+/**
+ * Machine Learning Classification Logic
+ */
 fun classifyGesture(
     liveData: List<SensorPoint>,
     library: List<GestureTemplate>,
-    threshold: Float = 60f // Adjusted threshold for normalized delta data
+    threshold: Float = 1.0f // Tuned for normalized Unit Directional data
 ): String {
 
-    // Pre-process live data: Convert to deltas and normalize scale
-    val processedLive = normalizeGesture(toDeltas(liveData))
+    // Recommendation 5: Trim silence from the live buffer
+    val trimmedLive = trimSilence(liveData)
+    val processedLive = toUnitDirections(trimmedLive)
     if (processedLive.isEmpty()) return "UNKNOWN"
 
     var bestMatch = "UNKNOWN"
     var lowestScore = Float.POSITIVE_INFINITY
 
-    // Loop through every saved gesture in the library
     for (template in library) {
-        // Pre-process template data: Convert to deltas and normalize scale
-        val processedTemplate = normalizeGesture(toDeltas(template.data))
+        // Recommendation 5: Trim silence from the templates
+        val trimmedTemplate = trimSilence(template.data)
+        val processedTemplate = toUnitDirections(trimmedTemplate)
         
+        if (processedTemplate.isEmpty()) continue
+
         val score = calculateDTW(processedLive, processedTemplate)
 
         if (score < lowestScore) {
@@ -116,7 +131,7 @@ fun classifyGesture(
         }
     }
 
-    // Reject it if even the "best" match is still too messy
+    // Return the name if it's within the confidence threshold
     if (lowestScore > threshold) {
         return "UNKNOWN"
     }
