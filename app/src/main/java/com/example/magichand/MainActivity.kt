@@ -27,8 +27,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // Gesture detection variables - Now supports multiple examples per slot
     private var isRecording = false
     private val recordedPoints = mutableListOf<SensorPoint>()
-    private val gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
-    
+    private var gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>() // Changed to 'var'
+
     // Live detection buffer
     private val liveBuffer = mutableListOf<SensorPoint>()
     private val bufferSize = 50 // Adjust based on gesture length
@@ -36,6 +36,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // Back-off timer variables
     private var isGestureCooldown = false
     private val handler = Handler(Looper.getMainLooper())
+
+    // SharedPreferences constants
+    private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
+    private val GESTURE_LIBRARY_KEY = "gesture_library"
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +57,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (accelerometer == null) {
             binding.SensorData.text = "Linear Acceleration sensor not available."
         }
+
+        // Load gesture library from SharedPreferences
+        loadGestureLibrary()
 
         // Handle Calibration Button Hold
         binding.gCalibrate.setOnTouchListener { _, event ->
@@ -75,6 +82,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             gestureLibrary.remove(currentSlot)
             updateSlotDisplay(currentSlot)
             binding.SensorData.text = "Deleted all examples in Slot $currentSlot"
+            saveGestureLibrary() // Save after deleting
         }
 
         // Update Slider Display
@@ -88,6 +96,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
         updateSlotDisplay(binding.gSlider.progress)
+    }
+
+    private fun loadGestureLibrary() {
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val serializedData = sharedPrefs.getString(GESTURE_LIBRARY_KEY, "") ?: ""
+        gestureLibrary = deserializeGestureLibrary(serializedData).toMutableMap()
+        binding.SensorData.text = "Loaded ${gestureLibrary.size} gesture slots."
+        updateSlotDisplay(binding.gSlider.progress) // Update display after loading
+    }
+
+    private fun saveGestureLibrary() {
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = sharedPrefs.edit()
+        val serializedData = serializeGestureLibrary()
+        editor.putString(GESTURE_LIBRARY_KEY, serializedData)
+        editor.apply()
+        // binding.SensorData.text = "Saved gesture library." // This line is not needed often, can be removed to avoid clutter
     }
 
     private fun updateSlotDisplay(slot: Int) {
@@ -115,6 +140,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             
             updateSlotDisplay(currentSlot)
             binding.SensorData.text = "Saved example #${examples.size} to Slot $currentSlot"
+            saveGestureLibrary() // Save after adding a gesture
         } else {
             binding.SensorData.text = "Recording was too quiet or empty."
         }
@@ -136,6 +162,79 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         
         if (firstActive == -1 || lastActive == -1) return emptyList()
         return points.subList(firstActive, lastActive + 1).toList()
+    }
+
+    // NEW: Serialization method
+    private fun serializeGestureLibrary(): String {
+        val stringBuilder = StringBuilder()
+        var firstSlot = true
+        for ((slot, examples) in gestureLibrary) {
+            if (!firstSlot) {
+                stringBuilder.append("~") // Revert to String
+            }
+            stringBuilder.append(slot).append(":") // Revert to String
+            val examplesString = examples.joinToString("#") { gestureExample -> // Revert to String
+                gestureExample.joinToString(";") { point -> // Revert to String
+                    "${point.x},${point.y},${point.z}"
+                }
+            }
+            stringBuilder.append(examplesString)
+            firstSlot = false
+        }
+        return stringBuilder.toString()
+    }
+
+    // NEW: Deserialization method
+    private fun deserializeGestureLibrary(serializedData: String): Map<Int, MutableList<List<SensorPoint>>> {
+        val loadedLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
+        if (serializedData.isBlank()) return loadedLibrary
+
+        val slotStrings = serializedData.split("~") // Revert to String
+
+        for (slotString in slotStrings) {
+            // Manual split for ':', limit = 2
+            val colonIndex = slotString.indexOf(':')
+            val parts = if (colonIndex == -1) {
+                listOf(slotString)
+            } else {
+                listOf(slotString.substring(0, colonIndex), slotString.substring(colonIndex + 1))
+            }
+            // End manual split
+
+            if (parts.size == 2) {
+                val slotIndex = parts[0].toIntOrNull()
+                val examplesData = parts[1]
+
+                if (slotIndex != null) {
+                    val examplesForSlot = mutableListOf<List<SensorPoint>>()
+                    val gestureExampleStrings = examplesData.split("#") // Revert to String
+
+                    for (gestureExampleString in gestureExampleStrings) {
+                        val points = mutableListOf<SensorPoint>()
+                        val pointStrings = gestureExampleString.split(";") // Revert to String
+
+                        for (pointString in pointStrings) {
+                            val coords = pointString.split(",") // Revert to String
+                            if (coords.size == 3) {
+                                val x = coords[0].toFloatOrNull()
+                                val y = coords[1].toFloatOrNull()
+                                val z = coords[2].toFloatOrNull()
+                                if (x != null && y != null && z != null) {
+                                    points.add(SensorPoint(x, y, z))
+                                }
+                            }
+                        }
+                        if (points.isNotEmpty()) {
+                            examplesForSlot.add(points)
+                        }
+                    }
+                    if (examplesForSlot.isNotEmpty()) {
+                        loadedLibrary[slotIndex] = examplesForSlot
+                    }
+                }
+            }
+        }
+        return loadedLibrary
     }
 
     override fun onResume() {
