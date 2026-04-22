@@ -8,14 +8,29 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioManager // Import for AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent // Import for KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import androidx.appcompat.app.AppCompatActivity
 import com.example.magichand.databinding.ActivityMainBinding
 import java.util.Locale
 import kotlin.math.sqrt
+
+enum class GestureAction(val actionName: String) {
+    NONE("No Action"),
+    VOLUME_UP("Volume Up"),
+    VOLUME_DOWN("Volume Down"),
+    MEDIA_PLAY_PAUSE("Play/Pause Media"),
+    SWIPE_LEFT("Swipe Left"),
+    SWIPE_RIGHT("Swipe Right")
+    // Add more actions as needed
+}
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
@@ -23,11 +38,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
     private var defaultBackground: Drawable? = null
+    private lateinit var audioManager: AudioManager // Initialize AudioManager
 
     // Gesture detection variables - Now supports multiple examples per slot
     private var isRecording = false
     private val recordedPoints = mutableListOf<SensorPoint>()
-    private var gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>() // Changed to 'var'
+    private var gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
 
     // Live detection buffer
     private val liveBuffer = mutableListOf<SensorPoint>()
@@ -40,6 +56,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // SharedPreferences constants
     private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
     private val GESTURE_LIBRARY_KEY = "gesture_library"
+    private val GESTURE_ACTION_MAPPING_KEY = "gesture_action_mapping" // New key for action mapping
+
+    // Gesture Action Mapping
+    private var gestureActionMapping = mutableMapOf<Int, GestureAction>() // Maps slot to action
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,13 +73,34 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // Initialize the Sensor Manager safely
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager // Initialize AudioManager
 
         if (accelerometer == null) {
             binding.SensorData.text = "Linear Acceleration sensor not available."
         }
 
-        // Load gesture library from SharedPreferences
+        // Load gesture library and action mapping from SharedPreferences
         loadGestureLibrary()
+        loadGestureActionMapping()
+
+        // Setup Spinner for gesture actions
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, GestureAction.values().map { it.actionName })
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.actionSpinner.adapter = adapter
+
+        binding.actionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedAction = GestureAction.values()[position]
+                val currentSlot = binding.gSlider.progress
+                gestureActionMapping[currentSlot] = selectedAction
+                saveGestureActionMapping()
+                binding.SensorData.text = "Slot $currentSlot mapped to ${selectedAction.actionName}"
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+                // Do nothing
+            }
+        }
 
         // Handle Calibration Button Hold
         binding.gCalibrate.setOnTouchListener { _, event ->
@@ -80,9 +121,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         binding.gDelete.setOnClickListener {
             val currentSlot = binding.gSlider.progress
             gestureLibrary.remove(currentSlot)
+            gestureActionMapping.remove(currentSlot) // Also remove action mapping
             updateSlotDisplay(currentSlot)
             binding.SensorData.text = "Deleted all examples in Slot $currentSlot"
             saveGestureLibrary() // Save after deleting
+            saveGestureActionMapping() // Save action mapping after deleting
         }
 
         // Update Slider Display
@@ -90,6 +133,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!isGestureCooldown) {
                     updateSlotDisplay(progress)
+                    // Update spinner selection when slot changes
+                    val currentAction = gestureActionMapping[progress] ?: GestureAction.NONE
+                    binding.actionSpinner.setSelection(GestureAction.values().indexOf(currentAction))
                 }
             }
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
@@ -115,9 +161,25 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // binding.SensorData.text = "Saved gesture library." // This line is not needed often, can be removed to avoid clutter
     }
 
+    private fun loadGestureActionMapping() {
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val serializedMapping = sharedPrefs.getString(GESTURE_ACTION_MAPPING_KEY, "") ?: ""
+        gestureActionMapping = deserializeGestureActionMapping(serializedMapping).toMutableMap()
+    }
+
+    private fun saveGestureActionMapping() {
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = sharedPrefs.edit()
+        val serializedMapping = serializeGestureActionMapping()
+        editor.putString(GESTURE_ACTION_MAPPING_KEY, serializedMapping)
+        editor.apply()
+    }
+
     private fun updateSlotDisplay(slot: Int) {
         val count = gestureLibrary[slot]?.size ?: 0
-        binding.gDisplay.text = "Slot: $slot ($count examples)"
+        val currentAction = gestureActionMapping[slot]?.actionName ?: GestureAction.NONE.actionName
+        binding.gDisplay.text = """Slot: $slot ($count examples)
+Action: $currentAction"""
     }
 
     private fun startRecording() {
@@ -164,17 +226,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return points.subList(firstActive, lastActive + 1).toList()
     }
 
-    // NEW: Serialization method
+    // NEW: Serialization method for gesture library
     private fun serializeGestureLibrary(): String {
         val stringBuilder = StringBuilder()
         var firstSlot = true
         for ((slot, examples) in gestureLibrary) {
             if (!firstSlot) {
-                stringBuilder.append("~") // Revert to String
+                stringBuilder.append("~") // Separator for slots
             }
-            stringBuilder.append(slot).append(":") // Revert to String
-            val examplesString = examples.joinToString("#") { gestureExample -> // Revert to String
-                gestureExample.joinToString(";") { point -> // Revert to String
+            stringBuilder.append(slot).append(":") // Slot ID
+            val examplesString = examples.joinToString("#") { gestureExample -> // Separator for examples within a slot
+                gestureExample.joinToString(";") { point -> // Separator for points within an example
                     "${point.x},${point.y},${point.z}"
                 }
             }
@@ -184,12 +246,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         return stringBuilder.toString()
     }
 
-    // NEW: Deserialization method
+    // NEW: Deserialization method for gesture library
     private fun deserializeGestureLibrary(serializedData: String): Map<Int, MutableList<List<SensorPoint>>> {
         val loadedLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
         if (serializedData.isBlank()) return loadedLibrary
 
-        val slotStrings = serializedData.split("~") // Revert to String
+        val slotStrings = serializedData.split("~")
 
         for (slotString in slotStrings) {
             // Manual split for ':', limit = 2
@@ -207,14 +269,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
                 if (slotIndex != null) {
                     val examplesForSlot = mutableListOf<List<SensorPoint>>()
-                    val gestureExampleStrings = examplesData.split("#") // Revert to String
+                    val gestureExampleStrings = examplesData.split("#")
 
                     for (gestureExampleString in gestureExampleStrings) {
                         val points = mutableListOf<SensorPoint>()
-                        val pointStrings = gestureExampleString.split(";") // Revert to String
+                        val pointStrings = gestureExampleString.split(";")
 
                         for (pointString in pointStrings) {
-                            val coords = pointString.split(",") // Revert to String
+                            val coords = pointString.split(",")
                             if (coords.size == 3) {
                                 val x = coords[0].toFloatOrNull()
                                 val y = coords[1].toFloatOrNull()
@@ -235,6 +297,45 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
         return loadedLibrary
+    }
+
+    // NEW: Serialization method for gesture action mapping
+    private fun serializeGestureActionMapping(): String {
+        val stringBuilder = StringBuilder()
+        var firstEntry = true
+        for ((slot, action) in gestureActionMapping) {
+            if (!firstEntry) {
+                stringBuilder.append("|") // Separator for map entries
+            }
+            stringBuilder.append(slot).append(",").append(action.name) // Slot,ActionName
+            firstEntry = false
+        }
+        return stringBuilder.toString()
+    }
+
+    // NEW: Deserialization method for gesture action mapping
+    private fun deserializeGestureActionMapping(serializedData: String): Map<Int, GestureAction> {
+        val loadedMapping = mutableMapOf<Int, GestureAction>()
+        if (serializedData.isBlank()) return loadedMapping
+
+        val entries = serializedData.split("|")
+        for (entry in entries) {
+            val parts = entry.split(",")
+            if (parts.size == 2) {
+                val slot = parts[0].toIntOrNull()
+                val actionName = parts[1]
+                if (slot != null) {
+                    try {
+                        val action = GestureAction.valueOf(actionName)
+                        loadedMapping[slot] = action
+                    } catch (e: IllegalArgumentException) {
+                        // Handle cases where action name might be invalid (e.g., from old version)
+                        println("Warning: Unknown GestureAction name '$actionName'")
+                    }
+                }
+            }
+        }
+        return loadedMapping
     }
 
     override fun onResume() {
@@ -303,19 +404,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
             
             // Pass a copy of the live buffer to the classifier
-            val detectedGesture = classifyGesture(liveBuffer.toList(), templates, threshold = 1.0f)
+            val detectedGestureSlot = classifyGesture(liveBuffer.toList(), templates, threshold = 1.0f)
 
-            if (detectedGesture != "UNKNOWN") {
-                showDetectedGesture(detectedGesture)
+            if (detectedGestureSlot != "UNKNOWN") {
+                showDetectedGesture(detectedGestureSlot.toInt()) // Pass the slot ID
             }
         }
     }
 
-    private fun showDetectedGesture(gestureName: String) {
+    private fun showDetectedGesture(slot: Int) {
         isGestureCooldown = true
         binding.rootLayout.setBackgroundColor(Color.YELLOW)
-        binding.gDisplay.text = "DETECTED: $gestureName"
         
+        val detectedAction = gestureActionMapping[slot] ?: GestureAction.NONE
+        binding.gDisplay.text = "DETECTED: Slot $slot (${detectedAction.actionName})"
+        
+        // Perform the action
+        performGestureAction(detectedAction)
+
         liveBuffer.clear()
 
         handler.postDelayed({
@@ -324,6 +430,38 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             updateSlotDisplay(binding.gSlider.progress)
             binding.SensorData.text = "Ready for next gesture"
         }, 1000)
+    }
+
+    private fun performGestureAction(action: GestureAction) {
+        when (action) {
+            GestureAction.VOLUME_UP -> {
+                audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_PLAY_SOUND)
+                println("Action: Volume Up")
+            }
+            GestureAction.VOLUME_DOWN -> {
+                audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_PLAY_SOUND)
+                println("Action: Volume Down")
+            }
+            GestureAction.MEDIA_PLAY_PAUSE -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                println("Action: Media Play/Pause")
+            }
+            GestureAction.SWIPE_LEFT -> {
+                // These actions (swipe left/right) usually require AccessibilityService
+                // or root permissions for direct input simulation across the system.
+                // For now, we'll just log it.
+                println("Action: Swipe Left")
+            }
+            GestureAction.SWIPE_RIGHT -> {
+                println("Action: Swipe Right")
+            }
+            GestureAction.NONE -> {
+                println("Action: No Action (ignored)")
+            }
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
