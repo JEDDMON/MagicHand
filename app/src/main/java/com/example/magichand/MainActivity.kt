@@ -7,6 +7,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.Drawable
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.view.MotionEvent
@@ -29,10 +33,13 @@ enum class GestureAction(val actionName: String) {
     // Add more actions as needed
 }
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var binding: ActivityMainBinding
     private var defaultBackground: Drawable? = null
+
+    private var sensorManager: SensorManager? = null
+    private var accelerometer: Sensor? = null
 
     // Gesture recording variables
     private var isRecording = false
@@ -63,6 +70,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Initialize Sensor Manager
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
 
         // Request POST_NOTIFICATIONS permission for Android 13+ devices
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -151,6 +162,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (isRecording && event != null && event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+            recordedPoints.add(SensorPoint(x, y, z))
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Not used
+    }
+
     private fun loadGestureLibrary() {
         val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
         val serializedData = sharedPrefs.getString(GESTURE_LIBRARY_KEY, "") ?: ""
@@ -191,12 +215,16 @@ Action: $currentAction"""
     private fun startRecording() {
         isRecording = true
         recordedPoints.clear()
+        accelerometer?.let {
+            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
         binding.rootLayout.setBackgroundColor(Color.RED)
         binding.SensorData.text = "Recording..."
     }
 
     private fun stopRecording() {
         isRecording = false
+        sensorManager?.unregisterListener(this)
         val currentSlot = binding.gSlider.progress
         
         // Copy the points so they don't get cleared later
