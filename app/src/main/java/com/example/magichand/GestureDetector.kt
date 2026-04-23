@@ -20,12 +20,29 @@ fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
 }
 
 /**
- * Recommendation 5: Trimming Silence
+ * Trims silence from the start and end of a list of sensor points.
+ * Used for recording gestures, with a higher activity threshold.
+ */
+fun trimSilenceForRecording(points: List<SensorPoint>): List<SensorPoint> {
+    val activityThreshold = 1.0f // Magnitude threshold for "active" movement during recording
+    val firstActive = points.indexOfFirst { p -> 
+        sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
+    }
+    val lastActive = points.indexOfLast { p -> 
+        sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
+    }
+    
+    if (firstActive == -1 || lastActive == -1) return emptyList()
+    return points.subList(firstActive, lastActive + 1).toList()
+}
+
+/**
+ * Recommendation 5: Trimming Silence (private helper for classification)
  * Removes points from the start and end where movement is near zero.
  * This ensures the DTW algorithm doesn't get confused by "standing still" time.
  */
-private fun trimSilence(points: List<SensorPoint>): List<SensorPoint> {
-    val activityThreshold = 0.5f 
+private fun trimSilenceForClassification(points: List<SensorPoint>): List<SensorPoint> {
+    val activityThreshold = 0.5f // Magnitude threshold for "active" movement during classification
     val firstActive = points.indexOfFirst { p -> 
         sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
     }
@@ -109,7 +126,7 @@ fun classifyGesture(
 ): String {
 
     // Recommendation 5: Trim silence from the live buffer
-    val trimmedLive = trimSilence(liveData)
+    val trimmedLive = trimSilenceForClassification(liveData)
     val processedLive = toUnitDirections(trimmedLive)
     if (processedLive.isEmpty()) return "UNKNOWN"
 
@@ -118,7 +135,7 @@ fun classifyGesture(
 
     for (template in library) {
         // Recommendation 5: Trim silence from the templates
-        val trimmedTemplate = trimSilence(template.data)
+        val trimmedTemplate = trimSilenceForClassification(template.data)
         val processedTemplate = toUnitDirections(trimmedTemplate)
         
         if (processedTemplate.isEmpty()) continue
