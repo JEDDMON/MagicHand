@@ -28,6 +28,10 @@ enum class GestureAction(val actionName: String) {
     VOLUME_UP("Volume Up"),
     VOLUME_DOWN("Volume Down"),
     MEDIA_PLAY_PAUSE("Play/Pause Media"),
+    MEDIA_NEXT("Next Track"),
+    MEDIA_PREVIOUS("Previous Track"),
+    TOGGLE_FLASHLIGHT("Toggle Flashlight"),
+    TOGGLE_MUTE("Toggle Mute"),
     SWIPE_LEFT("Swipe Left"),
     SWIPE_RIGHT("Swipe Right")
     // Add more actions as needed

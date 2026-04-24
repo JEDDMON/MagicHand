@@ -10,6 +10,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -29,6 +30,8 @@ class GestureDetectionService : Service(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
     private lateinit var audioManager: AudioManager
+    private lateinit var cameraManager: CameraManager
+    private var isFlashlightOn = false
 
     // Live detection buffer
     private val liveBuffer = mutableListOf<SensorPoint>()
@@ -64,6 +67,7 @@ class GestureDetectionService : Service(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         loadGestureLibrary()
         loadGestureActionMapping()
@@ -206,6 +210,40 @@ class GestureDetectionService : Service(), SensorEventListener {
                 val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
                 audioManager.dispatchMediaKeyEvent(eventUp)
                 Log.i("GestureDetectionService", "Action: Media Play/Pause performed")
+            }
+            GestureAction.MEDIA_NEXT -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Action: Media Next performed")
+            }
+            GestureAction.MEDIA_PREVIOUS -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Action: Media Previous performed")
+            }
+            GestureAction.TOGGLE_FLASHLIGHT -> {
+                try {
+                    val cameraId = cameraManager.cameraIdList[0]
+                    isFlashlightOn = !isFlashlightOn
+                    cameraManager.setTorchMode(cameraId, isFlashlightOn)
+                    Log.i("GestureDetectionService", "Action: Toggle Flashlight performed. On: $isFlashlightOn")
+                } catch (e: Exception) {
+                    Log.e("GestureDetectionService", "Flashlight error: ${e.message}")
+                }
+            }
+            GestureAction.TOGGLE_MUTE -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val isMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                        if (isMuted) AudioManager.ADJUST_UNMUTE else AudioManager.ADJUST_MUTE, 0)
+                    Log.i("GestureDetectionService", "Action: Toggle Mute performed. Muted: ${!isMuted}")
+                } else {
+                    Log.i("GestureDetectionService", "Action: Toggle Mute not supported on this Android version.")
+                }
             }
             GestureAction.SWIPE_LEFT -> Log.i("GestureDetectionService", "Action: Swipe Left (Log only)")
             GestureAction.SWIPE_RIGHT -> Log.i("GestureDetectionService", "Action: Swipe Right (Log only)")
