@@ -245,8 +245,6 @@ class GestureDetectionService : Service(), SensorEventListener {
                     Log.i("GestureDetectionService", "Action: Toggle Mute not supported on this Android version.")
                 }
             }
-            GestureAction.SWIPE_LEFT -> Log.i("GestureDetectionService", "Action: Swipe Left (Log only)")
-            GestureAction.SWIPE_RIGHT -> Log.i("GestureDetectionService", "Action: Swipe Right (Log only)")
             GestureAction.NONE -> Log.i("GestureDetectionService", "Action: No Action")
         }
     }

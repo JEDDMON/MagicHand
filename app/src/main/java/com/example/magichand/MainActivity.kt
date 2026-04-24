@@ -31,10 +31,7 @@ enum class GestureAction(val actionName: String) {
     MEDIA_NEXT("Next Track"),
     MEDIA_PREVIOUS("Previous Track"),
     TOGGLE_FLASHLIGHT("Toggle Flashlight"),
-    TOGGLE_MUTE("Toggle Mute"),
-    SWIPE_LEFT("Swipe Left"),
-    SWIPE_RIGHT("Swipe Right")
-    // Add more actions as needed
+    TOGGLE_MUTE("Toggle Mute")
 }
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
