@@ -122,7 +122,7 @@ fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>, w
 fun classifyGesture(
     liveData: List<SensorPoint>,
     library: List<GestureTemplate>,
-    threshold: Float = 1.0f // Tuned for normalized Unit Directional data
+    threshold: Float = 0.5f // Tuned for normalized Unit Directional data
 ): String {
 
     // Recommendation 5: Trim silence from the live buffer
