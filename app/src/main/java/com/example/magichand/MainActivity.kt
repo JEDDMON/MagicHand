@@ -16,6 +16,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
@@ -26,12 +28,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.example.magichand.databinding.ActivityMainBinding
 import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -53,25 +53,6 @@ enum class GestureAction(val actionName: String) {
     TOGGLE_MUTE("Toggle Mute")
 }
 
-// Data class for /ping response
-data class PingResponse(
-    @SerializedName("status") val status: String,
-    @SerializedName("message") val message: String
-)
-
-// Data class for /post request body
-data class ActionMapRequest(
-    @SerializedName("app_name") val appName: String
-)
-
-// Type alias for /post response. Note: The key is dynamic, so we'll handle it flexibly.
-typealias ActionMap = Map<String, List<String>>
-
-// Data class for error responses
-data class ErrorResponse(
-    @SerializedName("error") val error: String
-)
-
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var binding: ActivityMainBinding
@@ -89,6 +70,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
     private val GESTURE_LIBRARY_KEY = "gesture_library"
     private val GESTURE_ACTION_MAPPING_KEY = "gesture_action_mapping"
+    private val SERVER_URL_KEY = "server_url"
 
     // Gesture Action Mapping
     private var gestureActionMapping = mutableMapOf<Int, GestureAction>() // Maps slot to action
@@ -208,7 +190,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         // Server URL and Ping functionality
-        binding.serverUrlEditText.setText("http://10.0.0.35:5000") // Default URL
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val savedUrl = sharedPrefs.getString(SERVER_URL_KEY, "http://10.0.0.35:5000")
+        binding.serverUrlEditText.setText(savedUrl)
+        
+        binding.serverUrlEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                sharedPrefs.edit().putString(SERVER_URL_KEY, s.toString()).apply()
+            }
+        })
+
         binding.pingServerButton.setOnClickListener {
             val serverUrl = binding.serverUrlEditText.text.toString()
             if (serverUrl.isNotBlank()) {
@@ -218,10 +211,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 binding.pingStatusTextView.setTextColor(Color.RED)
             }
         }
-
-        // Example usage of getActionMap (for testing purposes)
-        // You would typically call this when a foreground app changes
-        // getActionMap("instagram", "http://10.0.0.35:5000")
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -520,8 +509,8 @@ Action: $currentAction"""
 
         if (mode != AppOpsManager.MODE_ALLOWED) {
             val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-            val uri = Uri.fromParts("package", packageName, null)
-            intent.data = uri
+            // Usage access settings don't support URI for specific app in older versions, 
+            // and it's better to just open the list.
             startActivity(intent)
             Toast.makeText(this, "Please enable Usage Access for MagicHand in settings.", Toast.LENGTH_LONG).show()
         }

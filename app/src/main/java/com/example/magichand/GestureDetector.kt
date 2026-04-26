@@ -24,7 +24,7 @@ fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
  * Used for recording gestures, with a higher activity threshold.
  */
 fun trimSilenceForRecording(points: List<SensorPoint>): List<SensorPoint> {
-    val activityThreshold = 1.0f // Magnitude threshold for "active" movement during recording
+    val activityThreshold = 0.5f // Magnitude threshold for "active" movement during recording
     val firstActive = points.indexOfFirst { p -> 
         sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
     }
