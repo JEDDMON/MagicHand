@@ -31,6 +31,7 @@
         android:id="@+id/g_slider"
         style="@style/Widget.AppCompat.SeekBar.Discrete"
         android:layout_width="0dp"
+        android="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:max="2"
@@ -104,5 +105,36 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/start_service_button" />
+
+    <EditText
+        android:id="@+id/server_url_edit_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:hint="Enter Server URL (e.g., http://10.0.0.35:5000)"
+        android:inputType="textUri"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/stop_service_button" />
+
+    <Button
+        android:id="@+id/ping_server_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Ping Server"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/server_url_edit_text" />
+
+    <TextView
+        android:id="@+id/ping_status_text_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Server Status: Not Pinged"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ping_server_button" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

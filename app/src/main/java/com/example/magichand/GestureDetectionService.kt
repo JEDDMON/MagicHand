@@ -3,6 +3,8 @@ package com.example.magichand
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.usage.UsageStats
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -10,6 +12,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -18,7 +21,22 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+import java.lang.Exception
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
 
 class GestureDetectionService : Service(), SensorEventListener {
@@ -29,6 +47,8 @@ class GestureDetectionService : Service(), SensorEventListener {
     private var sensorManager: SensorManager? = null
     private var accelerometer: Sensor? = null
     private lateinit var audioManager: AudioManager
+    private lateinit var cameraManager: CameraManager
+    private var isFlashlightOn = false
 
     // Live detection buffer
     private val liveBuffer = mutableListOf<SensorPoint>()
@@ -42,10 +62,18 @@ class GestureDetectionService : Service(), SensorEventListener {
     private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
     private val GESTURE_LIBRARY_KEY = "gesture_library"
     private val GESTURE_ACTION_MAPPING_KEY = "gesture_action_mapping"
+    private val SERVER_URL_KEY = "server_url" // New key for server URL
 
     // Gesture detection variables
     private var gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
     private var gestureActionMapping = mutableMapOf<Int, GestureAction>()
+    private var serverUrl: String? = null
+    private var currentForegroundApp: String = ""
+    private var currentActionMap: List<String>? = null
+
+    // Network client and JSON parser
+    private val client = OkHttpClient()
+    private val gson = Gson()
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == GESTURE_LIBRARY_KEY) {
@@ -54,6 +82,9 @@ class GestureDetectionService : Service(), SensorEventListener {
         } else if (key == GESTURE_ACTION_MAPPING_KEY) {
             Log.i("GestureDetectionService", "Action mapping updated, reloading...")
             loadGestureActionMapping()
+        } else if (key == SERVER_URL_KEY) { // Handle server URL updates
+            Log.i("GestureDetectionService", "Server URL updated, reloading...")
+            serverUrl = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).getString(SERVER_URL_KEY, null)
         }
     }
 
@@ -64,18 +95,21 @@ class GestureDetectionService : Service(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         loadGestureLibrary()
         loadGestureActionMapping()
 
         val prefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+        serverUrl = prefs.getString(SERVER_URL_KEY, null)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Force reload library whenever start is called (e.g. from UI)
         loadGestureLibrary()
         loadGestureActionMapping()
+        serverUrl = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).getString(SERVER_URL_KEY, null)
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("MagicHands is listening")
@@ -92,6 +126,9 @@ class GestureDetectionService : Service(), SensorEventListener {
             Log.i("GestureDetectionService", "Sensor listener registered with DELAY_GAME.")
         }
 
+        // Start foreground app monitoring
+        startForegroundAppMonitoring()
+
         return START_STICKY
     }
 
@@ -101,6 +138,7 @@ class GestureDetectionService : Service(), SensorEventListener {
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         sensorManager?.unregisterListener(this)
         handler.removeCallbacksAndMessages(null)
+        stopForegroundAppMonitoring()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -178,9 +216,21 @@ class GestureDetectionService : Service(), SensorEventListener {
     private fun showDetectedGesture(slot: Int) {
         isGestureCooldown = true
         Log.d("GestureDetectionService", "Gesture MATCHED in slot: $slot")
-        
-        val detectedAction = gestureActionMapping[slot] ?: GestureAction.NONE
-        performGestureAction(detectedAction)
+
+        val actionChar = when (slot) {
+            0 -> currentActionMap?.getOrNull(0)
+            1 -> currentActionMap?.getOrNull(1)
+            2 -> currentActionMap?.getOrNull(2)
+            else -> null
+        }
+
+        if (actionChar != null) {
+            executeAction(actionChar)
+        } else {
+            // Fallback to locally mapped action if no server action or slot out of bounds
+            val detectedAction = gestureActionMapping[slot] ?: GestureAction.NONE
+            performGestureAction(detectedAction)
+        }
 
         liveBuffer.clear()
 
@@ -207,9 +257,86 @@ class GestureDetectionService : Service(), SensorEventListener {
                 audioManager.dispatchMediaKeyEvent(eventUp)
                 Log.i("GestureDetectionService", "Action: Media Play/Pause performed")
             }
-            GestureAction.SWIPE_LEFT -> Log.i("GestureDetectionService", "Action: Swipe Left (Log only)")
-            GestureAction.SWIPE_RIGHT -> Log.i("GestureDetectionService", "Action: Swipe Right (Log only)")
+            GestureAction.MEDIA_NEXT -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Action: Media Next performed")
+            }
+            GestureAction.MEDIA_PREVIOUS -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Action: Media Previous performed")
+            }
+            GestureAction.TOGGLE_FLASHLIGHT -> {
+                try {
+                    val cameraId = cameraManager.cameraIdList[0]
+                    isFlashlightOn = !isFlashlightOn
+                    cameraManager.setTorchMode(cameraId, isFlashlightOn)
+                    Log.i("GestureDetectionService", "Action: Toggle Flashlight performed. On: $isFlashlightOn")
+                } catch (e: Exception) {
+                    Log.e("GestureDetectionService", "Flashlight error: ${e.message}")
+                }
+            }
+            GestureAction.TOGGLE_MUTE -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val isMuted = audioManager.isStreamMute(AudioManager.STREAM_MUSIC)
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
+                        if (isMuted) AudioManager.ADJUST_UNMUTE else AudioManager.ADJUST_MUTE, 0)
+                    Log.i("GestureDetectionService", "Action: Toggle Mute performed. Muted: ${!isMuted}")
+                } else {
+                    Log.i("GestureDetectionService", "Action: Toggle Mute not supported on this Android version.")
+                }
+            }
             GestureAction.NONE -> Log.i("GestureDetectionService", "Action: No Action")
+        }
+    }
+
+    private fun executeAction(actionChar: String) {
+        when (actionChar.uppercase(Locale.ROOT)) {
+            "A" -> {
+                audioManager.adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_PLAY_SOUND)
+                Log.i("GestureDetectionService", "Server Action: Volume Up performed")
+            }
+            "B" -> {
+                audioManager.adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_PLAY_SOUND)
+                Log.i("GestureDetectionService", "Server Action: Volume Down performed")
+            }
+            "C" -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Server Action: Media Play/Pause performed")
+            }
+            "D" -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_NEXT)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Server Action: Media Next performed")
+            }
+            "E" -> {
+                val event = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(event)
+                val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                audioManager.dispatchMediaKeyEvent(eventUp)
+                Log.i("GestureDetectionService", "Server Action: Media Previous performed")
+            }
+            "F" -> {
+                try {
+                    val cameraId = cameraManager.cameraIdList[0]
+                    isFlashlightOn = !isFlashlightOn
+                    cameraManager.setTorchMode(cameraId, isFlashlightOn)
+                    Log.i("GestureDetectionService", "Server Action: Toggle Flashlight performed. On: $isFlashlightOn")
+                } catch (e: Exception) {
+                    Log.e("GestureDetectionService", "Server Action: Flashlight error: ${e.message}")
+                }
+            }
+            else -> Log.i("GestureDetectionService", "Server Action: Unknown action character $actionChar")
         }
     }
 
@@ -273,5 +400,102 @@ class GestureDetectionService : Service(), SensorEventListener {
             }
         }
         return loadedMapping
+    }
+
+    // --- Foreground App Monitoring --- 
+    private val FOREGROUND_APP_CHECK_INTERVAL = 2000L // Check every 2 seconds
+    private val foregroundAppChecker = object : Runnable {
+        override fun run() {
+            val appName = getForegroundAppPackageName()
+            if (appName != "" && appName != currentForegroundApp) {
+                Log.d("GestureDetectionService", "Foreground app changed to: $appName")
+                currentForegroundApp = appName
+                serverUrl?.let { url ->
+                    getActionMapFromServer(appName, url)
+                }
+            }
+            handler.postDelayed(this, FOREGROUND_APP_CHECK_INTERVAL)
+        }
+    }
+
+    private fun startForegroundAppMonitoring() {
+        handler.post(foregroundAppChecker)
+    }
+
+    private fun stopForegroundAppMonitoring() {
+        handler.removeCallbacks(foregroundAppChecker)
+    }
+
+    private fun getForegroundAppPackageName(): String {
+        var foregroundApp = ""
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val currentTime = System.currentTimeMillis()
+
+        // Query usage stats for the last 5 minutes
+        val usageStatsList: Map<String, UsageStats>? = usageStatsManager.queryAndAggregateUsageStats(
+            currentTime - TimeUnit.MINUTES.toMillis(5),
+            currentTime
+        )
+
+        usageStatsList?.let { statsMap ->
+            if (statsMap.isNotEmpty()) {
+                var lastTimeUsed: Long = 0
+                var topPackageName: String = ""
+
+                for ((packageName, usageStats) in statsMap) {
+                    if (usageStats.lastTimeUsed > lastTimeUsed) {
+                        lastTimeUsed = usageStats.lastTimeUsed
+                        topPackageName = packageName
+                    }
+                }
+                foregroundApp = topPackageName
+            }
+        }
+        return foregroundApp
+    }
+
+    private fun getActionMapFromServer(appName: String, serverUrl: String) {
+        val JSON = "application/json; charset=utf-8".toMediaType()
+        val requestBody = gson.toJson(ActionMapRequest(appName)).toRequestBody(JSON)
+
+        val request = Request.Builder()
+            .url("$serverUrl/post")
+            .post(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("GestureDetectionService", "Failed to get action map from server: ${e.message}")
+                // Optionally, clear currentActionMap or set a default
+                currentActionMap = null
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val responseBody = response.body?.string()
+                    if (response.isSuccessful && responseBody != null) {
+                        try {
+                            val type = object : TypeToken<Map<String, List<String>>>() {}.type
+                            val actionMap: Map<String, List<String>> = gson.fromJson(responseBody, type)
+                            currentActionMap = actionMap[appName] // Update the service's action map
+                            Log.d("GestureDetectionService", "Action Map for $appName loaded: $currentActionMap")
+                        } catch (e: Exception) {
+                            Log.e("GestureDetectionService", "Failed to parse action map response: ${e.message}")
+                            currentActionMap = null
+                        }
+                    } else {
+                        val errorResponse = if (responseBody != null) {
+                            try {
+                                gson.fromJson(responseBody, ErrorResponse::class.java)
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } else null
+                        Log.e("GestureDetectionService", "Failed to get action map: ${response.code} - ${errorResponse?.error ?: response.message}")
+                        currentActionMap = null
+                    }
+                }
+            }
+        })
     }
 }

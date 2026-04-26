@@ -24,7 +24,7 @@ fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
  * Used for recording gestures, with a higher activity threshold.
  */
 fun trimSilenceForRecording(points: List<SensorPoint>): List<SensorPoint> {
-    val activityThreshold = 1.0f // Magnitude threshold for "active" movement during recording
+    val activityThreshold = 0.8f // Magnitude threshold for "active" movement during recording
     val firstActive = points.indexOfFirst { p -> 
         sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
     }
@@ -42,7 +42,7 @@ fun trimSilenceForRecording(points: List<SensorPoint>): List<SensorPoint> {
  * This ensures the DTW algorithm doesn't get confused by "standing still" time.
  */
 private fun trimSilenceForClassification(points: List<SensorPoint>): List<SensorPoint> {
-    val activityThreshold = 0.5f // Magnitude threshold for "active" movement during classification
+    val activityThreshold = 0.8f // Magnitude threshold for "active" movement during classification
     val firstActive = points.indexOfFirst { p -> 
         sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()) > activityThreshold 
     }
@@ -122,7 +122,7 @@ fun calculateDTW(liveData: List<SensorPoint>, templateData: List<SensorPoint>, w
 fun classifyGesture(
     liveData: List<SensorPoint>,
     library: List<GestureTemplate>,
-    threshold: Float = 1.0f // Tuned for normalized Unit Directional data
+    threshold: Float = 0.5f // Tuned for normalized Unit Directional data
 ): String {
 
     // Recommendation 5: Trim silence from the live buffer

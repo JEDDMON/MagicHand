@@ -2,6 +2,7 @@ package com.example.magichand
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,8 +12,12 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.MotionEvent
 import android.view.View
 import android.widget.AdapterView
@@ -22,15 +27,30 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.example.magichand.databinding.ActivityMainBinding
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import java.io.IOException
+import java.lang.Exception
 
 enum class GestureAction(val actionName: String) {
     NONE("No Action"),
     VOLUME_UP("Volume Up"),
     VOLUME_DOWN("Volume Down"),
     MEDIA_PLAY_PAUSE("Play/Pause Media"),
-    SWIPE_LEFT("Swipe Left"),
-    SWIPE_RIGHT("Swipe Right")
-    // Add more actions as needed
+    MEDIA_NEXT("Next Track"),
+    MEDIA_PREVIOUS("Previous Track"),
+    TOGGLE_FLASHLIGHT("Toggle Flashlight"),
+    TOGGLE_MUTE("Toggle Mute")
 }
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
@@ -50,9 +70,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
     private val GESTURE_LIBRARY_KEY = "gesture_library"
     private val GESTURE_ACTION_MAPPING_KEY = "gesture_action_mapping"
+    private val SERVER_URL_KEY = "server_url"
 
     // Gesture Action Mapping
     private var gestureActionMapping = mutableMapOf<Int, GestureAction>() // Maps slot to action
+
+    // Network client and JSON parser
+    private val client = OkHttpClient()
+    private val gson = Gson()
 
     // Notification permission launcher
     private val requestPermissionLauncher = registerForActivityResult(
@@ -81,6 +106,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+        
+        // Request PACKAGE_USAGE_STATS permission
+        requestUsageStatsPermission()
 
         // Store the default background to revert to it later
         defaultBackground = binding.rootLayout.background
@@ -159,6 +187,29 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val serviceIntent = Intent(this, GestureDetectionService::class.java)
             stopService(serviceIntent)
             Toast.makeText(this, "Background gesture detection stopped", Toast.LENGTH_SHORT).show()
+        }
+
+        // Server URL and Ping functionality
+        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
+        val savedUrl = sharedPrefs.getString(SERVER_URL_KEY, "http://10.0.0.35:5000")
+        binding.serverUrlEditText.setText(savedUrl)
+        
+        binding.serverUrlEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                sharedPrefs.edit().putString(SERVER_URL_KEY, s.toString()).apply()
+            }
+        })
+
+        binding.pingServerButton.setOnClickListener {
+            val serverUrl = binding.serverUrlEditText.text.toString()
+            if (serverUrl.isNotBlank()) {
+                pingServer(serverUrl)
+            } else {
+                binding.pingStatusTextView.text = "Server URL cannot be empty."
+                binding.pingStatusTextView.setTextColor(Color.RED)
+            }
         }
     }
 
@@ -345,11 +396,123 @@ Action: $currentAction"""
                         val action = GestureAction.valueOf(actionName)
                         loadedMapping[slot] = action
                     } catch (e: IllegalArgumentException) {
-                        println("Warning: Unknown GestureAction name '$actionName'")
+                        println("Warning: Unknown GestureAction name \'$actionName\'")
                     }
                 }
             }
         }
         return loadedMapping
+    }
+    
+    private fun pingServer(serverUrl: String) {
+        binding.pingStatusTextView.text = "Pinging..."
+        binding.pingStatusTextView.setTextColor(Color.GRAY)
+
+        val request = Request.Builder()
+            .url("$serverUrl/ping")
+            .get()
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    binding.pingStatusTextView.text = "Ping failed: ${e.message}"
+                    binding.pingStatusTextView.setTextColor(Color.RED)
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val responseBody = response.body?.string()
+                    CoroutineScope(Dispatchers.Main).launch {
+                        if (response.isSuccessful && responseBody != null) {
+                            try {
+                                val pingResponse = gson.fromJson(responseBody, PingResponse::class.java)
+                                binding.pingStatusTextView.text = "Ping successful: ${pingResponse.message}"
+                                binding.pingStatusTextView.setTextColor(Color.GREEN)
+                            } catch (e: Exception) {
+                                binding.pingStatusTextView.text = "Ping response parsing failed: ${e.message}"
+                                binding.pingStatusTextView.setTextColor(Color.RED)
+                            }
+                        } else {
+                            binding.pingStatusTextView.text = "Ping failed: ${response.code} - ${response.message}"
+                            binding.pingStatusTextView.setTextColor(Color.RED)
+                        }
+                    }
+                }
+            }
+        })
+    }
+    
+    private fun getActionMap(appName: String, serverUrl: String) {
+        val JSON = "application/json; charset=utf-8".toMediaType()
+        val requestBody = gson.toJson(ActionMapRequest(appName)).toRequestBody(JSON)
+
+        val request = Request.Builder()
+            .url("$serverUrl/post")
+            .post(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                CoroutineScope(Dispatchers.Main).launch {
+                    // Handle failure, e.g., show a Toast or update a TextView
+                    Toast.makeText(this@MainActivity, "Failed to get action map: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val responseBody = response.body?.string()
+                    CoroutineScope(Dispatchers.Main).launch {
+                        if (response.isSuccessful && responseBody != null) {
+                            try {
+                                // Parse dynamically named key response using TypeToken
+                                val type = object : TypeToken<Map<String, List<String>>>() {}.type
+                                val actionMap: Map<String, List<String>> = gson.fromJson(responseBody, type)
+                                val actions = actionMap[appName] // Get the list of actions for the given appName
+
+                                if (actions != null) {
+                                    Toast.makeText(this@MainActivity, "Action Map for $appName: $actions", Toast.LENGTH_LONG).show()
+                                    // Here you would typically store/use the actions list
+                                    // For example, update a ViewModel or LiveData
+                                } else {
+                                    Toast.makeText(this@MainActivity, "Action map not found for $appName", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(this@MainActivity, "Failed to parse action map response: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            val errorResponse = if (responseBody != null) {
+                                try {
+                                    gson.fromJson(responseBody, ErrorResponse::class.java)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            } else null
+                            Toast.makeText(this@MainActivity, "Failed to get action map: ${response.code} - ${errorResponse?.error ?: response.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    private fun requestUsageStatsPermission() {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+        }
+
+        if (mode != AppOpsManager.MODE_ALLOWED) {
+            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            // Usage access settings don't support URI for specific app in older versions, 
+            // and it's better to just open the list.
+            startActivity(intent)
+            Toast.makeText(this, "Please enable Usage Access for MagicHand in settings.", Toast.LENGTH_LONG).show()
+        }
     }
 }
