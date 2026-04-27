@@ -34,7 +34,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import java.lang.Exception
+import java.util.LinkedList
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
@@ -50,9 +50,17 @@ class GestureDetectionService : Service(), SensorEventListener {
     private lateinit var cameraManager: CameraManager
     private var isFlashlightOn = false
 
-    // Live detection buffer
-    private val liveBuffer = mutableListOf<SensorPoint>()
-    private val bufferSize = 80 // Increased for SENSOR_DELAY_GAME coverage (approx 1.5-2 seconds)
+    // Live detection buffer (sliding window)
+    private val liveBuffer = LinkedList<SensorPoint>()
+    private val bufferSize = 100 // Target 2 seconds of data at ~50Hz (SENSOR_DELAY_GAME)
+
+    // Low-pass filter variables
+    private var lastFilteredPoint = SensorPoint(0f, 0f, 0f)
+    private val LOW_PASS_ALPHA = 0.8f // Filter coefficient (0.0 to 1.0, higher means less smoothing)
+
+    // Step-wise classification variables
+    private var sensorEventCount = 0
+    private val CLASSIFICATION_STRIDE = 10 // Classify every 10th sensor event
 
     // Back-off timer variables
     private var isGestureCooldown = false
@@ -62,7 +70,7 @@ class GestureDetectionService : Service(), SensorEventListener {
     private val SHARED_PREFS_NAME = "MagicHandGesturePrefs"
     private val GESTURE_LIBRARY_KEY = "gesture_library"
     private val GESTURE_ACTION_MAPPING_KEY = "gesture_action_mapping"
-    private val SERVER_URL_KEY = "server_url" // New key for server URL
+    private val SERVER_URL_KEY = "server_url"
 
     // Gesture detection variables
     private var gestureLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
@@ -122,8 +130,9 @@ class GestureDetectionService : Service(), SensorEventListener {
 
         accelerometer?.let {
             // Using SENSOR_DELAY_GAME to match MainActivity's recording frequency
-            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-            Log.i("GestureDetectionService", "Sensor listener registered with DELAY_GAME.")
+            // Set maxReportLatencyUs to 200ms for sensor batching
+            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, 200_000)
+            Log.i("GestureDetectionService", "Sensor listener registered with DELAY_GAME and batching (200ms).")
         }
 
         // Start foreground app monitoring
@@ -160,56 +169,48 @@ class GestureDetectionService : Service(), SensorEventListener {
             val x = event.values[0]
             val y = event.values[1]
             val z = event.values[2]
-            
-            // Reduced noise filter slightly to capture more subtle movements
-            val magSq = x * x + y * y + z * z
-            val currentPoint = if (magSq < 0.3) {
-                SensorPoint(0f, 0f, 0f)
-            } else {
-                SensorPoint(x, y, z)
-            }
+            val rawPoint = SensorPoint(x, y, z)
+
+            // Apply low-pass filter
+            lastFilteredPoint = lowPassFilter(rawPoint, lastFilteredPoint, LOW_PASS_ALPHA)
 
             if (!isGestureCooldown) {
-                processLiveBuffer(currentPoint)
+                // Add filtered point to the sliding window
+                liveBuffer.add(lastFilteredPoint)
+                if (liveBuffer.size > bufferSize) {
+                    liveBuffer.removeFirst()
+                }
+
+                sensorEventCount++
+                if (sensorEventCount % CLASSIFICATION_STRIDE == 0 && liveBuffer.size == bufferSize) {
+                    processLiveBuffer()
+                }
             }
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    private fun processLiveBuffer(point: SensorPoint) {
-        liveBuffer.add(point)
-        if (liveBuffer.size > bufferSize) {
-            liveBuffer.removeAt(0)
+    private fun processLiveBuffer() {
+        if (gestureLibrary.isEmpty()) {
+            Log.d("GestureDetectionService", "Gesture library is empty. Skipping classification.")
+            return
         }
 
-        if (gestureLibrary.isNotEmpty() && liveBuffer.size == bufferSize) {
-            var maxMagnitude = 0f
-            var activePointsCount = 0
-            for (p in liveBuffer) {
-                val mag = sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()).toFloat()
-                if (mag > maxMagnitude) maxMagnitude = mag
-                if (mag > 1.2f) activePointsCount++ // Lowered from 1.5f
+        val templates = mutableListOf<GestureTemplate>()
+        for ((slot, examples) in gestureLibrary) {
+            for (example in examples) {
+                templates.add(GestureTemplate(slot.toString(), example))
             }
+        }
 
-            // Lowered trigger threshold to be more sensitive (from 3.5 to 2.5)
-            if (maxMagnitude < 2.5f || activePointsCount < 5) {
-                return
-            }
+        // The threshold is tuned for normalized Unit Directional data and includes dynamic noise floor logic
+        val detectedGestureSlot = classifyGesture(liveBuffer.toList(), templates, threshold = 1.2f)
 
-            val templates = mutableListOf<GestureTemplate>()
-            for ((slot, examples) in gestureLibrary) {
-                for (example in examples) {
-                    templates.add(GestureTemplate(slot.toString(), example))
-                }
-            }
-            
-            // Slightly loosened threshold (from 1.0 to 1.2) for better matching
-            val detectedGestureSlot = classifyGesture(liveBuffer.toList(), templates, threshold = 1.2f)
-
-            if (detectedGestureSlot != "UNKNOWN") {
-                showDetectedGesture(detectedGestureSlot.toInt())
-            }
+        if (detectedGestureSlot != "UNKNOWN") {
+            showDetectedGesture(detectedGestureSlot.toInt())
+        } else {
+            Log.d("GestureDetectionService", "No gesture detected.")
         }
     }
 
@@ -232,7 +233,9 @@ class GestureDetectionService : Service(), SensorEventListener {
             performGestureAction(detectedAction)
         }
 
+        // Clear the buffer after a successful detection and before cooldown
         liveBuffer.clear()
+        lastFilteredPoint = SensorPoint(0f, 0f, 0f) // Reset filter state
 
         handler.postDelayed({
             isGestureCooldown = false
@@ -483,7 +486,8 @@ class GestureDetectionService : Service(), SensorEventListener {
                             Log.e("GestureDetectionService", "Failed to parse action map response: ${e.message}")
                             currentActionMap = null
                         }
-                    } else {
+                    }
+                    else {
                         val errorResponse = if (responseBody != null) {
                             try {
                                 gson.fromJson(responseBody, ErrorResponse::class.java)
