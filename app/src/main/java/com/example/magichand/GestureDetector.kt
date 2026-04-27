@@ -150,7 +150,7 @@ fun classifyGesture(
     for (p in processedLive) {
         totalEnergy += sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()).toFloat()
     }
-    val noiseFloorThreshold = 0.5f // Adjust this value as needed
+    val noiseFloorThreshold = 1.0f // Increased from 0.5f for higher sensitivity
     if (totalEnergy < noiseFloorThreshold) {
         // Device is likely sitting still or in a pocket, skip DTW
         return "UNKNOWN"

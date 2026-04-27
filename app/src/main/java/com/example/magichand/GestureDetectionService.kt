@@ -56,7 +56,7 @@ class GestureDetectionService : Service(), SensorEventListener {
 
     // Low-pass filter variables
     private var lastFilteredPoint = SensorPoint(0f, 0f, 0f)
-    private val LOW_PASS_ALPHA = 0.8f // Filter coefficient (0.0 to 1.0, higher means less smoothing)
+    private val LOW_PASS_ALPHA = 0.5f // Decreased from 0.8f for more smoothing
 
     // Step-wise classification variables
     private var sensorEventCount = 0
@@ -205,7 +205,7 @@ class GestureDetectionService : Service(), SensorEventListener {
         }
 
         // The threshold is tuned for normalized Unit Directional data and includes dynamic noise floor logic
-        val detectedGestureSlot = classifyGesture(liveBuffer.toList(), templates, threshold = 1.2f)
+        val detectedGestureSlot = classifyGesture(liveBuffer.toList(), templates, threshold = 0.8f) // Decreased from 1.2f for stricter matching
 
         if (detectedGestureSlot != "UNKNOWN") {
             showDetectedGesture(detectedGestureSlot.toInt())
