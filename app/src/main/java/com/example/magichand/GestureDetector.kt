@@ -20,6 +20,21 @@ fun calculateDistance(p1: SensorPoint, p2: SensorPoint): Float {
 }
 
 /**
+ * Applies a simple low-pass filter to a new sensor point.
+ * 
+ * @param newPoint The latest raw sensor data point.
+ * @param oldPoint The previously filtered sensor data point (or initial value).
+ * @param alpha The filter coefficient (between 0 and 1). Higher alpha means less smoothing.
+ * @return The filtered sensor data point.
+ */
+fun lowPassFilter(newPoint: SensorPoint, oldPoint: SensorPoint, alpha: Float): SensorPoint {
+    val x = oldPoint.x + alpha * (newPoint.x - oldPoint.x)
+    val y = oldPoint.y + alpha * (newPoint.y - oldPoint.y)
+    val z = oldPoint.z + alpha * (newPoint.z - oldPoint.z)
+    return SensorPoint(x, y, z)
+}
+
+/**
  * Trims silence from the start and end of a list of sensor points.
  * Used for recording gestures, with a higher activity threshold.
  */
@@ -129,6 +144,17 @@ fun classifyGesture(
     val trimmedLive = trimSilenceForClassification(liveData)
     val processedLive = toUnitDirections(trimmedLive)
     if (processedLive.isEmpty()) return "UNKNOWN"
+
+    // Dynamic Noise Floor: Calculate total energy of the trimmedLive buffer
+    var totalEnergy = 0f
+    for (p in processedLive) {
+        totalEnergy += sqrt((p.x * p.x + p.y * p.y + p.z * p.z).toDouble()).toFloat()
+    }
+    val noiseFloorThreshold = 1.0f // Increased from 0.5f for higher sensitivity
+    if (totalEnergy < noiseFloorThreshold) {
+        // Device is likely sitting still or in a pocket, skip DTW
+        return "UNKNOWN"
+    }
 
     var bestMatch = "UNKNOWN"
     var lowestScore = Float.POSITIVE_INFINITY
