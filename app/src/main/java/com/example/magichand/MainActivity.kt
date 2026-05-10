@@ -96,31 +96,141 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Initialize Sensor Manager
+        // --- NAVIGATION LOGIC ---
+        
+        // Scene 1 -> Admin
+        binding.btnAdmin.setOnClickListener {
+            binding.welcomeLayout.visibility = View.GONE
+            binding.recordGestureLayout.visibility = View.GONE
+            binding.enableMagicLayout.visibility = View.GONE
+            binding.legacyUiContainer.visibility = View.VISIBLE
+        }
+
+        // Admin -> Scene 1
+        binding.btnBackToWelcome.setOnClickListener {
+            binding.legacyUiContainer.visibility = View.GONE
+            binding.welcomeLayout.visibility = View.VISIBLE
+        }
+
+        // Scene 1 -> Scene 2
+        binding.btnProceed.setOnClickListener {
+            binding.welcomeLayout.visibility = View.GONE
+            binding.recordGestureLayout.visibility = View.VISIBLE
+        }
+
+        // Scene 2 -> Scene 1
+        binding.btnBackToWelcomeUser.setOnClickListener {
+            binding.recordGestureLayout.visibility = View.GONE
+            binding.welcomeLayout.visibility = View.VISIBLE
+        }
+
+        // Scene 2 -> Scene 3
+        binding.userBtnProceed.setOnClickListener {
+            binding.recordGestureLayout.visibility = View.GONE
+            binding.enableMagicLayout.visibility = View.VISIBLE
+        }
+
+        // Scene 3 -> Scene 2
+        binding.btnBackToRecordUser.setOnClickListener {
+            binding.enableMagicLayout.visibility = View.GONE
+            binding.recordGestureLayout.visibility = View.VISIBLE
+        }
+
+        // --- USER UI MAPPING (SCENE 2) ---
+
+        binding.userGSlider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) binding.gSlider.progress = progress
+                updateSlotDisplay(progress)
+            }
+            override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+        })
+
+        binding.userActionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (binding.actionSpinner.selectedItemPosition != position) {
+                    binding.actionSpinner.setSelection(position)
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        binding.userGCalibrate.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> { startRecording(); true }
+                MotionEvent.ACTION_UP -> { stopRecording(); true }
+                else -> false
+            }
+        }
+
+        binding.userGDelete.setOnClickListener { binding.gDelete.performClick() }
+
+        // --- USER UI MAPPING (SCENE 3) ---
+
+        binding.userPingServerButton.setOnClickListener {
+            val url = binding.userServerUrlEditText.text.toString()
+            if (url.isNotBlank()) pingServer(url)
+        }
+
+        binding.btnGrantPermissions.setOnClickListener {
+            requestUsageStatsPermission()
+        }
+
+        binding.userStartServiceButton.setOnClickListener {
+            startDetectionService()
+        }
+
+        binding.userStopServiceButton.setOnClickListener {
+            stopDetectionService()
+        }
+
+        // Sync URL between User UI and Legacy UI (Fixed logic to prevent infinite loop)
+        binding.userServerUrlEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val url = s.toString()
+                if (binding.serverUrlEditText.text.toString() != url) {
+                    binding.serverUrlEditText.setText(url)
+                }
+                getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).edit().putString(SERVER_URL_KEY, url).apply()
+            }
+        })
+        binding.serverUrlEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val url = s.toString()
+                if (binding.userServerUrlEditText.text.toString() != url) {
+                    binding.userServerUrlEditText.setText(url)
+                }
+                getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).edit().putString(SERVER_URL_KEY, url).apply()
+            }
+        })
+
+        // --- CORE INITIALIZATION ---
+
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
 
-        // Request POST_NOTIFICATIONS permission for Android 13+ devices
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
         
-        // Request PACKAGE_USAGE_STATS permission
+        // Commit logic: Always check for usage stats on startup
         requestUsageStatsPermission()
 
-        // Store the default background to revert to it later
         defaultBackground = binding.rootLayout.background
-
-        // Load gesture library and action mapping from SharedPreferences
         loadGestureLibrary()
         loadGestureActionMapping()
 
-        // Setup Spinner for gesture actions
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, GestureAction.values().map { it.actionName })
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.actionSpinner.adapter = adapter
+        binding.userActionSpinner.adapter = adapter
 
         binding.actionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -129,138 +239,120 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 gestureActionMapping[currentSlot] = selectedAction
                 saveGestureActionMapping()
                 binding.SensorData.text = "Slot $currentSlot mapped to ${selectedAction.actionName}"
+                if (binding.userActionSpinner.selectedItemPosition != position) {
+                    binding.userActionSpinner.setSelection(position)
+                }
+                updateSlotDisplay(currentSlot)
             }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {
-                // Do nothing
-            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
-        // Handle Calibration Button Hold
         binding.gCalibrate.setOnTouchListener { _, event ->
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startRecording()
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    stopRecording()
-                    true
-                }
+                MotionEvent.ACTION_DOWN -> { startRecording(); true }
+                MotionEvent.ACTION_UP -> { stopRecording(); true }
                 else -> false
             }
         }
 
-        // Handle Delete Button - Now deletes all examples for the current slot
         binding.gDelete.setOnClickListener {
             val currentSlot = binding.gSlider.progress
             gestureLibrary.remove(currentSlot)
-            gestureActionMapping.remove(currentSlot) // Also remove action mapping
+            gestureActionMapping.remove(currentSlot)
             updateSlotDisplay(currentSlot)
             binding.SensorData.text = "Deleted all examples in Slot $currentSlot"
-            saveGestureLibrary() // Save after deleting
-            saveGestureActionMapping() // Save action mapping after deleting
+            saveGestureLibrary()
+            saveGestureActionMapping()
         }
 
-        // Update Slider Display
         binding.gSlider.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 updateSlotDisplay(progress)
-                // Update spinner selection when slot changes
                 val currentAction = gestureActionMapping[progress] ?: GestureAction.NONE
                 binding.actionSpinner.setSelection(GestureAction.values().indexOf(currentAction))
+                if (fromUser) binding.userGSlider.progress = progress
             }
             override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
         })
-        updateSlotDisplay(binding.gSlider.progress)
 
-        // Handle Start Service Button
-        binding.startServiceButton.setOnClickListener { 
-            val serviceIntent = Intent(this, GestureDetectionService::class.java)
-            ContextCompat.startForegroundService(this, serviceIntent)
-            Toast.makeText(this, "Background gesture detection started", Toast.LENGTH_SHORT).show()
-        }
+        binding.startServiceButton.setOnClickListener { startDetectionService() }
+        binding.stopServiceButton.setOnClickListener { stopDetectionService() }
 
-        // Handle Stop Service Button
-        binding.stopServiceButton.setOnClickListener { 
-            val serviceIntent = Intent(this, GestureDetectionService::class.java)
-            stopService(serviceIntent)
-            Toast.makeText(this, "Background gesture detection stopped", Toast.LENGTH_SHORT).show()
-        }
-
-        // Server URL and Ping functionality
         val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
         val savedUrl = sharedPrefs.getString(SERVER_URL_KEY, "http://10.0.0.35:5000")
         binding.serverUrlEditText.setText(savedUrl)
-        
-        binding.serverUrlEditText.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                sharedPrefs.edit().putString(SERVER_URL_KEY, s.toString()).apply()
-            }
-        })
+        binding.userServerUrlEditText.setText(savedUrl)
 
         binding.pingServerButton.setOnClickListener {
-            val serverUrl = binding.serverUrlEditText.text.toString()
-            if (serverUrl.isNotBlank()) {
-                pingServer(serverUrl)
+            val url = binding.serverUrlEditText.text.toString()
+            if (url.isNotBlank()) {
+                pingServer(url)
             } else {
                 binding.pingStatusTextView.text = "Server URL cannot be empty."
                 binding.pingStatusTextView.setTextColor(Color.RED)
             }
         }
+        
+        // Set initial state for spinners and display
+        val initialSlot = binding.gSlider.progress
+        val initialAction = gestureActionMapping[initialSlot] ?: GestureAction.NONE
+        val actionIdx = GestureAction.values().indexOf(initialAction)
+        binding.actionSpinner.setSelection(actionIdx)
+        binding.userActionSpinner.setSelection(actionIdx)
+        updateSlotDisplay(initialSlot)
+    }
+
+    private fun startDetectionService() {
+        val serviceIntent = Intent(this, GestureDetectionService::class.java)
+        ContextCompat.startForegroundService(this, serviceIntent)
+        Toast.makeText(this, "Background gesture detection started", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopDetectionService() {
+        val serviceIntent = Intent(this, GestureDetectionService::class.java)
+        stopService(serviceIntent)
+        Toast.makeText(this, "Background gesture detection stopped", Toast.LENGTH_SHORT).show()
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (isRecording && event != null && event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
-            val x = event.values[0]
-            val y = event.values[1]
-            val z = event.values[2]
-            recordedPoints.add(SensorPoint(x, y, z))
+            recordedPoints.add(SensorPoint(event.values[0], event.values[1], event.values[2]))
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-        // Not used
-    }
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun loadGestureLibrary() {
         val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
         val serializedData = sharedPrefs.getString(GESTURE_LIBRARY_KEY, "") ?: ""
         gestureLibrary = deserializeGestureLibrary(serializedData).toMutableMap()
         binding.SensorData.text = "Loaded ${gestureLibrary.size} gesture slots."
-        updateSlotDisplay(binding.gSlider.progress) // Update display after loading
+        updateSlotDisplay(binding.gSlider.progress)
     }
 
     private fun saveGestureLibrary() {
-        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = sharedPrefs.edit()
         val serializedData = serializeGestureLibrary()
-        editor.putString(GESTURE_LIBRARY_KEY, serializedData)
-        editor.apply()
+        getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).edit().putString(GESTURE_LIBRARY_KEY, serializedData).apply()
     }
 
     private fun loadGestureActionMapping() {
-        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
-        val serializedMapping = sharedPrefs.getString(GESTURE_ACTION_MAPPING_KEY, "") ?: ""
+        val serializedMapping = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).getString(GESTURE_ACTION_MAPPING_KEY, "") ?: ""
         gestureActionMapping = deserializeGestureActionMapping(serializedMapping).toMutableMap()
     }
 
     private fun saveGestureActionMapping() {
-        val sharedPrefs = getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE)
-        val editor = sharedPrefs.edit()
         val serializedMapping = serializeGestureActionMapping()
-        editor.putString(GESTURE_ACTION_MAPPING_KEY, serializedMapping)
-        editor.apply()
+        getSharedPreferences(SHARED_PREFS_NAME, Context.MODE_PRIVATE).edit().putString(GESTURE_ACTION_MAPPING_KEY, serializedMapping).apply()
     }
 
     private fun updateSlotDisplay(slot: Int) {
         val count = gestureLibrary[slot]?.size ?: 0
-        val currentAction = gestureActionMapping[slot]?.actionName ?: GestureAction.NONE.actionName
+        val currentAction = gestureActionMapping[slot] ?: GestureAction.NONE
         binding.gDisplay.text = """Slot: $slot ($count examples)
-Action: $currentAction"""
+Action: ${currentAction.actionName}"""
+        // Enhanced Scene 2 display
+        binding.userGDisplay.text = "Gesture ${slot + 1} - Action: ${currentAction.actionName}"
     }
 
     private fun startRecording() {
@@ -277,18 +369,13 @@ Action: $currentAction"""
         isRecording = false
         sensorManager?.unregisterListener(this)
         val currentSlot = binding.gSlider.progress
-        
-        // Copy the points so they don't get cleared later
         val trimmedPoints = trimSilenceForRecording(recordedPoints.toList())
-        
         if (trimmedPoints.isNotEmpty()) {
-            // Add the new example to the list for this slot
             val examples = gestureLibrary.getOrPut(currentSlot) { mutableListOf() }
             examples.add(trimmedPoints)
-            
             updateSlotDisplay(currentSlot)
             binding.SensorData.text = "Saved example #${examples.size} to Slot $currentSlot"
-            saveGestureLibrary() // Save after adding a gesture
+            saveGestureLibrary()
         } else {
             binding.SensorData.text = "Recording was too quiet or empty."
         }
@@ -303,14 +390,10 @@ Action: $currentAction"""
         val stringBuilder = StringBuilder()
         var firstSlot = true
         for ((slot, examples) in gestureLibrary) {
-            if (!firstSlot) {
-                stringBuilder.append("~") // Separator for slots
-            }
-            stringBuilder.append(slot).append(":") // Slot ID
-            val examplesString = examples.joinToString("#") { gestureExample -> // Separator for examples within a slot
-                gestureExample.joinToString(";") { point -> // Separator for points within an example
-                    "${point.x},${point.y},${point.z}"
-                }
+            if (!firstSlot) stringBuilder.append("~")
+            stringBuilder.append(slot).append(":")
+            val examplesString = examples.joinToString("#") { gestureExample ->
+                gestureExample.joinToString(";") { point -> "${point.x},${point.y},${point.z}" }
             }
             stringBuilder.append(examplesString)
             firstSlot = false
@@ -321,49 +404,29 @@ Action: $currentAction"""
     private fun deserializeGestureLibrary(serializedData: String): Map<Int, MutableList<List<SensorPoint>>> {
         val loadedLibrary = mutableMapOf<Int, MutableList<List<SensorPoint>>>()
         if (serializedData.isBlank()) return loadedLibrary
-
         val slotStrings = serializedData.split("~")
-
         for (slotString in slotStrings) {
             val colonIndex = slotString.indexOf(':')
-            val parts = if (colonIndex == -1) {
-                listOf(slotString)
-            } else {
-                listOf(slotString.substring(0, colonIndex), slotString.substring(colonIndex + 1))
-            }
-
-            if (parts.size == 2) {
-                val slotIndex = parts[0].toIntOrNull()
-                val examplesData = parts[1]
-
-                if (slotIndex != null) {
-                    val examplesForSlot = mutableListOf<List<SensorPoint>>()
-                    val gestureExampleStrings = examplesData.split("#")
-
-                    for (gestureExampleString in gestureExampleStrings) {
-                        val points = mutableListOf<SensorPoint>()
-                        val pointStrings = gestureExampleString.split(";")
-
-                        for (pointString in pointStrings) {
-                            val coords = pointString.split(",")
-                            if (coords.size == 3) {
-                                val x = coords[0].toFloatOrNull()
-                                val y = coords[1].toFloatOrNull()
-                                val z = coords[2].toFloatOrNull()
-                                if (x != null && y != null && z != null) {
-                                    points.add(SensorPoint(x, y, z))
-                                }
-                            }
-                        }
-                        if (points.isNotEmpty()) {
-                            examplesForSlot.add(points)
-                        }
-                    }
-                    if (examplesForSlot.isNotEmpty()) {
-                        loadedLibrary[slotIndex] = examplesForSlot
+            if (colonIndex == -1) continue
+            val slotIndex = slotString.substring(0, colonIndex).toIntOrNull() ?: continue
+            val examplesData = slotString.substring(colonIndex + 1)
+            val examplesForSlot = mutableListOf<List<SensorPoint>>()
+            val gestureExampleStrings = examplesData.split("#")
+            for (gestureExampleString in gestureExampleStrings) {
+                val points = mutableListOf<SensorPoint>()
+                val pointStrings = gestureExampleString.split(";")
+                for (pointString in pointStrings) {
+                    val coords = pointString.split(",")
+                    if (coords.size == 3) {
+                        val x = coords[0].toFloatOrNull()
+                        val y = coords[1].toFloatOrNull()
+                        val z = coords[2].toFloatOrNull()
+                        if (x != null && y != null && z != null) points.add(SensorPoint(x, y, z))
                     }
                 }
+                if (points.isNotEmpty()) examplesForSlot.add(points)
             }
+            if (examplesForSlot.isNotEmpty()) loadedLibrary[slotIndex] = examplesForSlot
         }
         return loadedLibrary
     }
@@ -372,10 +435,8 @@ Action: $currentAction"""
         val stringBuilder = StringBuilder()
         var firstEntry = true
         for ((slot, action) in gestureActionMapping) {
-            if (!firstEntry) {
-                stringBuilder.append("|") // Separator for map entries
-            }
-            stringBuilder.append(slot).append(",").append(action.name) // Slot,ActionName
+            if (!firstEntry) stringBuilder.append("|")
+            stringBuilder.append(slot).append(",").append(action.name)
             firstEntry = false
         }
         return stringBuilder.toString()
@@ -384,21 +445,15 @@ Action: $currentAction"""
     private fun deserializeGestureActionMapping(serializedData: String): Map<Int, GestureAction> {
         val loadedMapping = mutableMapOf<Int, GestureAction>()
         if (serializedData.isBlank()) return loadedMapping
-
         val entries = serializedData.split("|")
         for (entry in entries) {
             val parts = entry.split(",")
             if (parts.size == 2) {
-                val slot = parts[0].toIntOrNull()
+                val slot = parts[0].toIntOrNull() ?: continue
                 val actionName = parts[1]
-                if (slot != null) {
-                    try {
-                        val action = GestureAction.valueOf(actionName)
-                        loadedMapping[slot] = action
-                    } catch (e: IllegalArgumentException) {
-                        println("Warning: Unknown GestureAction name \'$actionName\'")
-                    }
-                }
+                try {
+                    loadedMapping[slot] = GestureAction.valueOf(actionName)
+                } catch (e: Exception) {}
             }
         }
         return loadedMapping
@@ -407,20 +462,17 @@ Action: $currentAction"""
     private fun pingServer(serverUrl: String) {
         binding.pingStatusTextView.text = "Pinging..."
         binding.pingStatusTextView.setTextColor(Color.GRAY)
-
-        val request = Request.Builder()
-            .url("$serverUrl/ping")
-            .get()
-            .build()
-
+        binding.userPingStatusText.text = "Status: Pinging..."
+        
+        val request = Request.Builder().url("$serverUrl/ping").get().build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 CoroutineScope(Dispatchers.Main).launch {
                     binding.pingStatusTextView.text = "Ping failed: ${e.message}"
                     binding.pingStatusTextView.setTextColor(Color.RED)
+                    binding.userPingStatusText.text = "Status: Ping failed"
                 }
             }
-
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val responseBody = response.body?.string()
@@ -430,13 +482,16 @@ Action: $currentAction"""
                                 val pingResponse = gson.fromJson(responseBody, PingResponse::class.java)
                                 binding.pingStatusTextView.text = "Ping successful: ${pingResponse.message}"
                                 binding.pingStatusTextView.setTextColor(Color.GREEN)
+                                binding.userPingStatusText.text = "Status: Connected"
                             } catch (e: Exception) {
-                                binding.pingStatusTextView.text = "Ping response parsing failed: ${e.message}"
+                                binding.pingStatusTextView.text = "Parsing failed"
                                 binding.pingStatusTextView.setTextColor(Color.RED)
+                                binding.userPingStatusText.text = "Status: Error"
                             }
                         } else {
-                            binding.pingStatusTextView.text = "Ping failed: ${response.code} - ${response.message}"
+                            binding.pingStatusTextView.text = "Ping failed: ${response.code}"
                             binding.pingStatusTextView.setTextColor(Color.RED)
+                            binding.userPingStatusText.text = "Status: Error ${response.code}"
                         }
                     }
                 }
@@ -447,57 +502,33 @@ Action: $currentAction"""
     private fun getActionMap(appName: String, serverUrl: String) {
         val JSON = "application/json; charset=utf-8".toMediaType()
         val requestBody = gson.toJson(ActionMapRequest(appName)).toRequestBody(JSON)
-
-        val request = Request.Builder()
-            .url("$serverUrl/post")
-            .post(requestBody)
-            .build()
-
+        val request = Request.Builder().url("$serverUrl/post").post(requestBody).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 CoroutineScope(Dispatchers.Main).launch {
-                    // Handle failure, e.g., show a Toast or update a TextView
                     Toast.makeText(this@MainActivity, "Failed to get action map: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val responseBody = response.body?.string()
                     CoroutineScope(Dispatchers.Main).launch {
                         if (response.isSuccessful && responseBody != null) {
                             try {
-                                // Parse dynamically named key response using TypeToken
                                 val type = object : TypeToken<Map<String, List<String>>>() {}.type
                                 val actionMap: Map<String, List<String>> = gson.fromJson(responseBody, type)
-                                val actions = actionMap[appName] // Get the list of actions for the given appName
-
+                                val actions = actionMap[appName]
                                 if (actions != null) {
                                     Toast.makeText(this@MainActivity, "Action Map for $appName: $actions", Toast.LENGTH_LONG).show()
-                                    // Here you would typically store/use the actions list
-                                    // For example, update a ViewModel or LiveData
-                                } else {
-                                    Toast.makeText(this@MainActivity, "Action map not found for $appName", Toast.LENGTH_SHORT).show()
                                 }
-                            } catch (e: Exception) {
-                                Toast.makeText(this@MainActivity, "Failed to parse action map response: ${e.message}", Toast.LENGTH_LONG).show()
-                            }
-                        } else {
-                            val errorResponse = if (responseBody != null) {
-                                try {
-                                    gson.fromJson(responseBody, ErrorResponse::class.java)
-                                } catch (e: Exception) {
-                                    null
-                                }
-                            } else null
-                            Toast.makeText(this@MainActivity, "Failed to get action map: ${response.code} - ${errorResponse?.error ?: response.message}", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {}
                         }
                     }
                 }
             }
         })
     }
-
+    
     private fun requestUsageStatsPermission() {
         val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -509,8 +540,6 @@ Action: $currentAction"""
 
         if (mode != AppOpsManager.MODE_ALLOWED) {
             val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-            // Usage access settings don't support URI for specific app in older versions, 
-            // and it's better to just open the list.
             startActivity(intent)
             Toast.makeText(this, "Please enable Usage Access for MagicHand in settings.", Toast.LENGTH_LONG).show()
         }
